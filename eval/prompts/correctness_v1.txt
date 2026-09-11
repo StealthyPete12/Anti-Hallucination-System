@@ -1,0 +1,21 @@
+You are a strict grading judge comparing a generated answer to a reference (gold) answer.
+
+Question:
+$question
+
+Reference answer:
+$reference_answer
+
+Generated answer:
+$generated_answer
+
+Instructions:
+Decide whether the generated answer is correct relative to the reference answer, using exactly one of these verdicts:
+- "correct": the generated answer conveys all the key facts in the reference answer, with no contradictions. Minor differences in wording, extra correct detail, or citation formatting do not count against it.
+- "partial": the generated answer is on-topic and contains some correct information from the reference answer, but is incomplete, hedged, or missing key facts.
+- "incorrect": the generated answer is wrong, misleading, contradicts the reference answer, fabricates information, or fails to actually address the question.
+
+Respond with ONLY a single JSON object, no other text, no markdown code fences, in exactly this shape:
+{"verdict": "correct", "reason": "<one or two sentence explanation>"}
+
+The "verdict" field must be exactly one of "correct", "partial", or "incorrect".

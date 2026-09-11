@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# uv / venv
+.venv/
+
+# Editors / OS
+.DS_Store
+
+# Raw HTML snapshots are a large, regenerable intermediate artifact.
+# Regenerate with: python scripts/fetch_corpus.py
+data/raw_html/
+
+# Downloaded embedding model weights (regenerable; see rag/embedders/local.py)
+.cache/
+
+# Local environment overrides
+.env
+

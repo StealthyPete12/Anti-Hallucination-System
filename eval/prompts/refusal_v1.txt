@@ -1,0 +1,20 @@
+You are judging whether a RAG system correctly refused to answer, or correctly challenged a false premise, rather than fabricating an answer.
+
+Question:
+$question
+
+Question type: $question_type
+
+Reference answer (an example of what a correct refusal or premise-correction looks like):
+$reference_answer
+
+Generated answer:
+$generated_answer
+
+Instructions:
+- If question type is "unanswerable": the retrieved context does not contain the answer, so the system should have refused to answer (e.g. stated it does not have enough information) instead of fabricating an answer.
+- If question type is "false_premise": the question embeds a false premise, so the system should have identified and challenged that premise instead of accepting it and answering as if it were true.
+Decide whether the generated answer did this correctly. A generated answer that partially answers the question but still fabricates facts built on the false premise, or still answers an unanswerable question instead of declining, counts as NOT refused.
+
+Respond with ONLY a single JSON object, no other text, no markdown code fences, in exactly this shape:
+{"refused": true, "reason": "<one or two sentence explanation>"}

@@ -1,0 +1,86 @@
+[project]
+name = "anti-hallucination-system"
+version = "0.1.0"
+description = "RAG evaluation foundation: corpus ingestion, deterministic chunking, and a manually-verified golden benchmark set"
+readme = "README.md"
+authors = [
+    { name = "Timothy.D12", email = "128306852+StealthyPete12@users.noreply.github.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.141.1",
+    "httpx>=0.28.1",
+    "litellm>=1.100.1",
+    "pydantic-settings>=2.15.0",
+    "qdrant-client>=1.19.0",
+    "sentence-transformers>=6.0.1",
+    "torch>=2.2",
+    "uvicorn[standard]>=0.52.4",
+]
+
+[dependency-groups]
+dev = [
+    "beautifulsoup4>=4.12",
+    "mypy>=1.11",
+    "pre-commit>=3.8",
+    "pytest>=8.3",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "rag"
+module-root = ""
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["rag"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: exercises a real dependency (qdrant-client engine, downloaded model weights) rather than a fake; slower, still offline-safe unless noted.",
+]
+
+[tool.mypy]
+# Set above the project's requires-python floor (3.11) only so mypy can parse
+# newer PEP 695 syntax appearing in third-party stub files (e.g. numpy); our
+# own code still targets 3.11 and uses no newer syntax.
+python_version = "3.12"
+files = ["rag", "app", "config.py", "scripts"]
+ignore_missing_imports = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+
+[tool.uv]
+index-strategy = "unsafe-best-match"
+
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
