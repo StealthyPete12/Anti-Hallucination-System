@@ -7,7 +7,7 @@ same shapes without importing each other's implementation modules.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from pydantic import BaseModel
@@ -32,6 +32,14 @@ class Chunk:
             "heading": self.heading,
             "chunk_id": self.chunk_id,
         }
+
+
+@dataclass(frozen=True)
+class SparseVector:
+    """A sparse (BM25) vector: parallel arrays of vocabulary-term indices and weights."""
+
+    indices: list[int]
+    values: list[float]
 
 
 @dataclass(frozen=True)
@@ -77,3 +85,9 @@ class PipelineResult:
     usage: TokenUsage
     cost_usd: float
     trace_id: str
+    # Phase 5: runtime citation validation (rag.citation_validator) - whether
+    # every citation in `answer` was actually retrieved for this query, and
+    # which weren't if not. Defaults keep this field backward compatible
+    # with any pre-Phase-5 PipelineResult construction site.
+    citation_validation_passed: bool = True
+    invalid_citations: list[str] = field(default_factory=list)

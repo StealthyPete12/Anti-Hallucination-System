@@ -209,25 +209,55 @@ async def run_pass(
     return await asyncio.gather(*(bound(q) for q in questions))
 
 
-def build_config(judge_model: str) -> dict[str, Any]:
+def build_config(judge_model: str, *, pipeline: RagPipeline | None = None) -> dict[str, Any]:
+    """Scorecard ``config`` section. Reflects Phase 4 retrieval settings (mode,
+    reranker, embedder) read off ``pipeline`` when it exposes them (a real
+    ``RagPipeline``, including an experiment-specific one built with
+    overridden settings) - falling back to the global ``settings`` for
+    anything a minimal test fake doesn't happen to implement, so a fake
+    satisfying only ``.query()`` (as ``eval.run``'s own integration tests use)
+    still works unchanged."""
+    embedder = getattr(pipeline, "embedder", None)
+    generator = getattr(pipeline, "generator", None)
+    reranker = getattr(pipeline, "reranker", None)
+    query_rewriter = getattr(pipeline, "query_rewriter", None)
     return {
-        "embedder": settings.embedding_model_name,
-        "generator": settings.llm_model,
+        "embedder": getattr(embedder, "model_name", None) or settings.embedding_model_name,
+        "generator": getattr(generator, "model", None) or settings.llm_model,
         "judge": judge_model,
         "judge_prompt_hash": {name: load_prompt(name).sha256 for name in JUDGE_PROMPTS},
-        "top_k": settings.top_k,
-        "rerank": False,
+        "top_k": getattr(pipeline, "top_k", None) or settings.top_k,
+        "retrieval_mode": getattr(pipeline, "retrieval_mode", None) or settings.retrieval_mode,
+        "rerank": reranker is not None
+        if hasattr(pipeline, "reranker")
+        else settings.reranker_enabled,
+        "reranker_model": getattr(reranker, "model_name", None)
+        or (settings.reranker_model if settings.reranker_enabled else None),
+        "query_rewrite": query_rewriter is not None
+        if hasattr(pipeline, "query_rewriter")
+        else settings.query_rewrite_enabled,
     }
 
 
 async def run_evaluation(
     *,
     dataset_path: str,
-    out_path: str,
+    out_path: str | None,
     repeats: int,
     concurrency: int,
     judge_model: str,
+    pipeline: RagPipeline | None = None,
+    judge: LLMJudge | None = None,
 ) -> dict[str, Any]:
+    """Run the full evaluation harness.
+
+    ``pipeline``/``judge`` default to the production singleton (``get_pipeline()``)
+    and a fresh :class:`LLMJudge`, matching the original CLI behavior. Passing
+    them explicitly lets a caller (e.g. ``eval.experiment``) evaluate a
+    differently-configured pipeline without touching global settings or the
+    cached ``get_pipeline()`` singleton. ``out_path=None`` skips writing the
+    scorecard to disk (the caller writes it itself).
+    """
     questions = load_golden_set(dataset_path)
     logger.info(
         "dataset=%s num_questions=%d repeats=%d concurrency=%d judge_model=%s",
@@ -238,14 +268,14 @@ async def run_evaluation(
         judge_model,
     )
 
-    pipeline = get_pipeline()
-    judge = LLMJudge(
+    pipeline = pipeline or get_pipeline()
+    judge = judge or LLMJudge(
         model=judge_model,
         timeout=settings.judge_timeout_seconds,
         max_retries=settings.judge_max_retries,
     )
     git_sha = get_git_sha()
-    config = build_config(judge_model)
+    config = build_config(judge_model, pipeline=pipeline)
     logger.info("git_sha=%s judge_prompt_hash=%s", git_sha, config["judge_prompt_hash"])
 
     scorecards: list[dict[str, Any]] = []
@@ -283,10 +313,11 @@ async def run_evaluation(
         ]
         output["noise_floor"] = compute_noise_floor(scorecards)
 
-    out_file = Path(out_path)
-    out_file.parent.mkdir(parents=True, exist_ok=True)
-    out_file.write_text(json.dumps(output, indent=2), encoding="utf-8")
-    logger.info("Wrote scorecard to %s", out_file)
+    if out_path is not None:
+        out_file = Path(out_path)
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(output, indent=2), encoding="utf-8")
+        logger.info("Wrote scorecard to %s", out_file)
 
     return output
 

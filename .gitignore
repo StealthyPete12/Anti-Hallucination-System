@@ -21,3 +21,10 @@ data/raw_html/
 # Local environment overrides
 .env
 
+# Ad-hoc local evaluation run output (regenerate with `uv run python -m
+# eval.run`). evals/baseline.json and evals/history/ are committed on
+# purpose - CI writes/reads them; only scratch output here is ignored.
+evals/results.json
+evals/noise_floor.json
+comment.md
+

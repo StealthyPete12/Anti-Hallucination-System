@@ -10,15 +10,31 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
+from app.db.repository import FeedbackRepository
+from app.db.session import build_engine, get_db, init_db
 from app.dependencies import get_pipeline
-from app.schemas import HealthResponse, QueryRequest, QueryResponse, RetrievedChunkOut
+from app.schemas import (
+    FeedbackRequest,
+    FeedbackResponse,
+    HealthResponse,
+    MetricsResponse,
+    QueryRequest,
+    QueryResponse,
+    RetrievedChunkOut,
+)
 from config import settings
 from rag.generator import GenerationError
+from rag.metrics import metrics_recorder
 from rag.pipeline import RagPipeline
 from rag.stores.qdrant import VectorStoreError
+from rag.telemetry import setup_telemetry
 
 logging.basicConfig(
     level=getattr(logging, settings.log_level.upper(), logging.INFO),
@@ -26,12 +42,55 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app")
 
-app = FastAPI(title="Anti-Hallucination RAG API", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    setup_telemetry(settings)  # never raises - see rag/telemetry.py
+    try:
+        init_db(build_engine(settings))
+    except SQLAlchemyError:
+        logger.warning(
+            "Could not reach Postgres at startup; /feedback will fail until it's reachable",
+            exc_info=True,
+        )
+    yield
+
+
+app = FastAPI(title="Anti-Hallucination RAG API", version="0.1.0", lifespan=lifespan)
 
 
 @app.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     return HealthResponse(status="ok")
+
+
+@app.get("/metrics", response_model=MetricsResponse)
+def metrics() -> MetricsResponse:
+    """Rolling-window operational metrics over the last
+    ``RAG_METRICS_WINDOW_SIZE`` requests served by this process (see
+    rag/metrics.py). Phoenix is the durable, cross-replica source of truth;
+    this is a cheap in-process supplement."""
+    snapshot = metrics_recorder.snapshot()
+    return MetricsResponse(
+        count=snapshot.count,
+        mean_cost_usd=snapshot.mean_cost_usd,
+        p95_latency_ms=snapshot.p95_latency_ms,
+        window_size=snapshot.window_size,
+    )
+
+
+@app.post("/feedback", response_model=FeedbackResponse)
+def feedback(request: FeedbackRequest, db: Session = Depends(get_db)) -> FeedbackResponse:  # noqa: B008
+    """Persist a user rating, correlated to the trace_id of the request it's
+    about (see app/db/models.py::Feedback for why that column matters)."""
+    try:
+        FeedbackRepository(db).create(
+            trace_id=request.trace_id, rating=request.rating, comment=request.comment
+        )
+    except SQLAlchemyError as exc:
+        logger.error("Could not persist feedback for trace_id=%s: %s", request.trace_id, exc)
+        raise HTTPException(status_code=503, detail="Feedback storage unavailable") from exc
+    return FeedbackResponse(success=True)
 
 
 @app.post("/query", response_model=QueryResponse)
@@ -70,4 +129,6 @@ def query(
         usage=result.usage,
         cost_usd=result.cost_usd,
         trace_id=result.trace_id,
+        citation_validation_passed=result.citation_validation_passed,
+        invalid_citations=result.invalid_citations,
     )

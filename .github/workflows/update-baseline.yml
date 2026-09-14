@@ -1,0 +1,122 @@
+name: update-baseline
+
+# Phase 3 baseline promotion: every merge to main re-runs the full
+# evaluation harness against the newly-merged code and, if the run
+# succeeds, promotes its scorecard to evals/baseline.json (the file
+# eval-pr.yml compares every future PR against) and archives a timestamped
+# copy under evals/history/ that is never overwritten or deleted.
+
+on:
+  push:
+    branches: [main]
+
+# Guard against the baseline-update commit itself re-triggering this
+# workflow (it also pushes to main).
+concurrency:
+  group: update-baseline
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  update-baseline:
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.15.1
+        ports:
+          - 6333:6333
+
+    env:
+      RAG_QDRANT_URL: http://localhost:6333
+      RAG_EMBEDDING_CACHE_DIR: .cache/embeddings
+      HAS_GENERATOR_KEY: ${{ secrets.GENERATOR_API_KEY != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Cache HuggingFace / embedding models
+        uses: actions/cache@v4
+        with:
+          path: .cache/embeddings
+          key: hf-models-${{ hashFiles('uv.lock') }}-${{ env.RAG_EMBEDDING_MODEL_NAME || 'BAAI/bge-small-en-v1.5' }}
+          restore-keys: |
+            hf-models-${{ hashFiles('uv.lock') }}-
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/collections && break
+            sleep 2
+          done
+
+      - name: Skip - no evaluation credentials configured
+        if: env.HAS_GENERATOR_KEY != 'true'
+        run: |
+          echo "::warning::GENERATOR_API_KEY is not set - skipping baseline update. " \
+               "evals/baseline.json remains unchanged."
+
+      - name: Rebuild index
+        if: env.HAS_GENERATOR_KEY == 'true'
+        run: uv run python -m scripts.index_corpus
+
+      - name: Run full evaluation
+        if: env.HAS_GENERATOR_KEY == 'true'
+        env:
+          OPENAI_API_KEY: ${{ secrets.GENERATOR_API_KEY }}
+        run: |
+          uv run python -m eval.run \
+            --dataset data/golden_set.jsonl \
+            --out evals/results.json \
+            --repeats 1
+
+      - name: Promote baseline and archive history
+        if: env.HAS_GENERATOR_KEY == 'true'
+        run: |
+          set -euo pipefail
+          DATE=$(date -u +%Y-%m-%d)
+          HISTORY_FILE="evals/history/${DATE}.json"
+          if [ -f "$HISTORY_FILE" ]; then
+            HISTORY_FILE="evals/history/${DATE}-$(date -u +%H%M%S).json"
+          fi
+          cp evals/results.json "$HISTORY_FILE"
+          cp evals/results.json evals/baseline.json
+          echo "Archived $HISTORY_FILE and promoted it to evals/baseline.json"
+
+      - name: Commit updated baseline
+        if: env.HAS_GENERATOR_KEY == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add evals/baseline.json evals/history/
+          if git diff --cached --quiet; then
+            echo "No baseline changes to commit."
+          else
+            git commit -m "chore: promote evaluation baseline for ${GITHUB_SHA::7} [skip ci]"
+            git push
+          fi
+
+      - name: Upload evaluation artifacts
+        if: always() && env.HAS_GENERATOR_KEY == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-update-${{ github.run_id }}
+          path: |
+            evals/results.json
+            evals/baseline.json
+          retention-days: 90
+          if-no-files-found: ignore

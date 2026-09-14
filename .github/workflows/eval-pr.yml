@@ -1,0 +1,188 @@
+name: eval-pr
+
+# Phase 3 CI quality gate: every pull request against main runs the Phase 2
+# evaluation harness against the real production pipeline, compares the
+# result to evals/baseline.json (eval.compare, see eval/compare.py), and
+# posts a markdown report as a PR comment. A hard rule violation (see the
+# GATE list in eval/compare.py - fabrications, faithfulness, recall,
+# refusal) fails this workflow; a soft violation (cost, latency) is reported
+# but never blocks merge.
+
+on:
+  pull_request:
+    branches: [main]
+
+# Cancel a stale run when new commits land on the same PR.
+concurrency:
+  group: eval-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # Fast, credential-free job: validates eval/compare.py, eval/report.py and
+  # the rest of the unit suite. Runs for every PR, including ones from forks.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Run unit test suite
+        run: uv run pytest tests/unit -q
+
+      - name: Lint
+        run: uv run ruff check .
+
+  # Full evaluation job: exercises the real pipeline (Qdrant + LLM provider),
+  # so it only runs for pull requests from branches in this repository - a
+  # fork PR cannot see GENERATOR_API_KEY / JUDGE_API_KEY, and this guard
+  # keeps a workflow_run-style secret leak impossible even if someone tries.
+  eval:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    needs: tests
+
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.15.1
+        ports:
+          - 6333:6333
+
+    env:
+      RAG_QDRANT_URL: http://localhost:6333
+      RAG_EMBEDDING_CACHE_DIR: .cache/embeddings
+      HAS_GENERATOR_KEY: ${{ secrets.GENERATOR_API_KEY != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras
+
+      - name: Cache HuggingFace / embedding models
+        uses: actions/cache@v4
+        with:
+          path: .cache/embeddings
+          key: hf-models-${{ hashFiles('uv.lock') }}-${{ env.RAG_EMBEDDING_MODEL_NAME || 'BAAI/bge-small-en-v1.5' }}
+          restore-keys: |
+            hf-models-${{ hashFiles('uv.lock') }}-
+
+      - name: Wait for Qdrant
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:6333/collections && break
+            sleep 2
+          done
+
+      - name: Rebuild index
+        if: env.HAS_GENERATOR_KEY == 'true'
+        run: uv run python -m scripts.index_corpus
+
+      - name: Run evaluation
+        id: run_eval
+        if: env.HAS_GENERATOR_KEY == 'true'
+        env:
+          # Both the generator and the judge default to OpenAI models via
+          # LiteLLM, so both secrets currently resolve to the same env var.
+          # If RAG_JUDGE_MODEL is pointed at a different provider than
+          # RAG_LLM_MODEL, add that provider's key env var here as well
+          # (e.g. ANTHROPIC_API_KEY: ${{ secrets.JUDGE_API_KEY }}).
+          OPENAI_API_KEY: ${{ secrets.GENERATOR_API_KEY }}
+        run: |
+          uv run python -m eval.run \
+            --dataset data/golden_set.jsonl \
+            --out evals/results.json \
+            --repeats 1
+
+      - name: Compare against baseline
+        id: compare
+        if: env.HAS_GENERATOR_KEY == 'true'
+        continue-on-error: true
+        run: |
+          uv run python -m eval.compare \
+            --baseline evals/baseline.json \
+            --candidate evals/results.json \
+            --out comment.md
+
+      - name: Missing-credentials notice
+        if: env.HAS_GENERATOR_KEY != 'true'
+        run: |
+          cat > comment.md <<'EOF'
+          # Evaluation Results
+
+          ⚪ **Evaluation skipped** - the `GENERATOR_API_KEY` repository secret
+          is not configured, so the full evaluation harness could not run
+          against a real LLM provider. This is a CI configuration gap, not a
+          quality signal: it does not fail the build, but retrieval/
+          generation regressions in this PR were **not** checked.
+
+          Ask a repository admin to add `GENERATOR_API_KEY` (and
+          `JUDGE_API_KEY` if the judge uses a different provider) under
+          Settings -> Secrets and variables -> Actions.
+          EOF
+
+      - name: Comment on pull request
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('comment.md', 'utf8');
+            const marker = '<!-- eval-pr-report -->';
+            const commentBody = `${marker}\n${body}`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.startsWith(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+            }
+
+      - name: Upload evaluation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-pr-${{ github.event.pull_request.number }}-${{ github.run_id }}
+          path: |
+            evals/results.json
+            comment.md
+          retention-days: 90
+          if-no-files-found: ignore
+
+      - name: Fail on hard gate failure
+        if: steps.compare.outcome == 'failure'
+        run: |
+          echo "Hard regression detected - see the PR comment for details."
+          exit 1

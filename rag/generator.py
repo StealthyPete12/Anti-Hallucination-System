@@ -12,10 +12,11 @@ citation in the API response.
 from __future__ import annotations
 
 import logging
-import re
 
 import litellm
 
+from rag.citation_validator import CITATION_RE
+from rag.cost import estimate_cost_usd
 from rag.models import GenerationResult, RetrievedChunk, TokenUsage
 
 logger = logging.getLogger("rag.generator")
@@ -34,8 +35,6 @@ MUST refuse explicitly. Reply with exactly: "The supplied context does not conta
 information to answer that question." Do not guess, speculate, or use outside knowledge.
 4. Never fabricate facts, sources, or citations. If in doubt, refuse.
 """
-
-_CITATION_RE = re.compile(r"\[([^\[\]\s]+)\]")
 
 
 class GenerationError(RuntimeError):
@@ -78,7 +77,7 @@ class LiteLLMGenerator:
 
         answer = response.choices[0].message.content or ""
         usage = _extract_usage(response)
-        cost_usd = _extract_cost(response, self.model)
+        cost_usd = _extract_cost(response, self.model, usage)
         citations = _extract_valid_citations(answer, retrieved_ids)
 
         logger.info("Generated answer with %d valid citation(s)", len(citations))
@@ -100,7 +99,7 @@ def _build_user_prompt(query: str, chunks: list[RetrievedChunk]) -> str:
 
 def _extract_valid_citations(answer: str, retrieved_ids: set[str]) -> list[str]:
     seen: list[str] = []
-    for match in _CITATION_RE.findall(answer):
+    for match in CITATION_RE.findall(answer):
         if match in retrieved_ids:
             if match not in seen:
                 seen.append(match)
@@ -120,7 +119,18 @@ def _extract_usage(response: object) -> TokenUsage:
     )
 
 
-def _extract_cost(response: object, model: str) -> float:
+def _extract_cost(response: object, model: str, usage: TokenUsage) -> float:
+    """Cost for one generation call.
+
+    Prefers ``config.MODEL_RATES`` (Phase 5's deterministic, config-driven
+    source of truth) when the model is listed there; falls back to
+    litellm's own pricing table (unchanged from Phase 1) for every other
+    model, so cost is still reported for a model this project's rate table
+    hasn't been updated for yet.
+    """
+    from_config = estimate_cost_usd(model, usage.prompt_tokens, usage.completion_tokens)
+    if from_config is not None:
+        return from_config
     try:
         return float(litellm.completion_cost(completion_response=response, model=model))
     except Exception as exc:  # noqa: BLE001 - cost lookup can fail for unpriced/unknown models

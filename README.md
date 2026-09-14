@@ -12,14 +12,31 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
   and runnable end to end with `docker compose up`. No hybrid retrieval,
   rerankers, query rewriting, or agents yet — this phase exists to
   establish a measurable baseline that later phases are compared against.
-- **Phase 2** (this phase) builds the evaluation harness that turns "it
-  seems to work" into numbers: deterministic retrieval metrics
-  (Recall@5/MRR/nDCG@10), LLM-judged faithfulness (per-claim hallucination
-  detection) and correctness, and refusal-behavior scoring on the
-  `unanswerable`/`false_premise` golden-set subsets — plus cost, latency,
-  and a measured run-to-run noise floor, so future retrieval/generation
-  changes can be judged against real variance instead of guesswork. See
+- **Phase 2** builds the evaluation harness that turns "it seems to work"
+  into numbers: deterministic retrieval metrics (Recall@5/MRR/nDCG@10),
+  LLM-judged faithfulness (per-claim hallucination detection) and
+  correctness, and refusal-behavior scoring on the `unanswerable`/
+  `false_premise` golden-set subsets — plus cost, latency, and a measured
+  run-to-run noise floor, so future retrieval/generation changes can be
+  judged against real variance instead of guesswork. See
   [Phase 2: Evaluation harness](#phase-2-evaluation-harness) below.
+- **Phase 3** turns that harness into an automated CI quality gate: every
+  pull request runs the full evaluation, compares the result against
+  `evals/baseline.json` with a configurable set of regression rules, posts
+  a markdown report as a PR comment, and fails the build on a hard
+  regression (fabrications, faithfulness, recall, or refusal) while
+  surfacing soft regressions (cost, latency) as non-blocking warnings.
+  Merges to `main` automatically re-run the evaluation and promote a new
+  baseline, archiving every prior scorecard under `evals/history/`. See
+  [Phase 3: CI quality gate](#phase-3-ci-quality-gate) below.
+- **Phase 4** (this phase) makes retrieval and generation config-driven
+  (dense/sparse/hybrid retrieval with BM25 + Reciprocal Rank Fusion,
+  cross-encoder reranking, swappable embedding/generator/reranker models,
+  optional query rewriting) and adds a reproducible experiment framework
+  plus judge-validation tooling, so every change is measured against the
+  Phase 2 harness before it's ever called an improvement. See
+  [Phase 4: Retrieval & generation experiments](#phase-4-retrieval--generation-experiments)
+  below.
 
 ## Project overview
 
@@ -28,14 +45,18 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
 ├── rag/
 │   ├── ingest.py               # Phase 0: corpus -> chunks.jsonl (feeds the golden set)
 │   ├── chunking.py              # Phase 1: recursive, token-bounded chunker (feeds the vector store)
-│   ├── models.py                # shared value types (Chunk, RetrievedChunk, PipelineResult, ...)
-│   ├── protocols.py             # Chunker / Embedder / VectorStore / Generator contracts
-│   ├── pipeline.py              # wires the above into index_corpus() and query()
+│   ├── models.py                # shared value types (Chunk, RetrievedChunk, SparseVector, ...)
+│   ├── protocols.py             # Chunker/Embedder/VectorStore/Generator/Reranker/... contracts
+│   ├── pipeline.py              # wires the above into index_corpus(), retrieve(), and query()
 │   ├── generator.py             # LiteLLM-backed, cited, grounded generation
+│   ├── fusion.py                # Phase 4: Reciprocal Rank Fusion
+│   ├── sparse.py                # Phase 4: BM25 sparse-vector encoding
+│   ├── reranker.py              # Phase 4: cross-encoder reranking (MiniLM / bge-reranker-base)
+│   ├── query_rewriter.py        # Phase 4: optional LLM query rewriting before retrieval
 │   ├── embedders/
-│   │   └── local.py             # BAAI/bge-small-en-v1.5 via sentence-transformers
+│   │   └── local.py             # sentence-transformers embedder (model swappable via config)
 │   └── stores/
-│       └── qdrant.py            # Qdrant-backed dense vector store
+│       └── qdrant.py            # Qdrant store: dense + Phase 4 named sparse vector + hybrid RRF
 │
 ├── eval/                        # Phase 2: evaluation harness
 │   ├── dataset.py                # typed golden-set loader
@@ -52,17 +73,24 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
 │   ├── results.py                # QuestionResult: one question's full evaluation record
 │   ├── scorecard.py               # aggregation + noise-floor (mean/stdev across --repeats)
 │   ├── summary.py                 # human-readable stdout summary table
-│   └── run.py                     # CLI: `python -m eval.run`
+│   ├── run.py                     # CLI: `python -m eval.run`
+│   ├── experiment.py              # Phase 4: reproducible experiment framework
+│   └── agreement.py               # Phase 4: human-vs-judge % agreement + Cohen's kappa
+│
+├── experiments/                  # Phase 4: one JSON record per experiment (git sha, timestamp,
+│                                  # config, metrics) - see eval/experiment.py
 │
 ├── app/
 │   ├── main.py                  # FastAPI app: GET /health, POST /query
-│   ├── dependencies.py          # builds the RagPipeline singleton from Settings
+│   ├── dependencies.py          # build_pipeline(settings) factory + cached get_pipeline()
 │   └── schemas.py               # QueryRequest / QueryResponse / HealthResponse
 │
 ├── scripts/
 │   ├── fetch_corpus.py          # one-time: download PostgreSQL 17 doc pages
 │   ├── extract_corpus.py        # one-time: raw HTML -> clean data/corpus/*.txt
-│   └── index_corpus.py          # chunk + embed + upsert data/corpus/*.txt into Qdrant
+│   ├── index_corpus.py          # chunk + embed + upsert data/corpus/*.txt into Qdrant
+│   ├── run_phase4_experiments.py # Phase 4: runs the measured retrieval-only experiment battery
+│   └── label.py                  # Phase 4: sample + manually label answers for judge validation
 │
 ├── data/
 │   ├── corpus/                  # 59 plain-text PostgreSQL 17 doc pages (~180 "pages")
@@ -76,8 +104,11 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
 │
 ├── tests/
 │   ├── test_golden_set.py       # Phase 0: golden-set schema/integrity tests
-│   ├── unit/                    # fast, no real model/Qdrant/LLM calls
-│   └── integration/             # real qdrant-client engine / real model weights /
+│   ├── unit/                    # fast, no real model/Qdrant/LLM calls (Phase 4: fusion, sparse,
+│   │                             # reranker, query rewriter, experiment framework, agreement,
+│   │                             # labeling workflow)
+│   └── integration/             # real qdrant-client engine (incl. Phase 4 sparse/hybrid) /
+│                                 # real model weights (incl. Phase 4 reranker/experiment e2e) /
 │                                 # eval.run's async orchestration (fakes throughout,
 │                                 # but exercises every module wired together)
 │
@@ -124,28 +155,43 @@ hallucination-resistance evaluation work.
 User Question
       |
       v
-Embed Query (BAAI/bge-small-en-v1.5, with the BGE query prefix)
+[Phase 4, optional] Query Rewriter (LLM rewrite for retrieval only;
+      |              generator always sees the original question)
+      v
+Embed Query (embedding model swappable via config, BGE query prefix if applicable)
       |
       v
-Qdrant Search (top-k dense retrieval)
+Qdrant Search - retrieval_mode = dense | sparse | hybrid (Phase 4):
+      dense  -> cosine search on the named "dense" vector
+      sparse -> BM25 search on the named "sparse" vector
+      hybrid -> both, fused client-side with Reciprocal Rank Fusion
       |
       v
-Top-K Chunks (rank preserved)
+Top-`retrieval_fanout` Candidates (rank preserved)
       |
       v
-LiteLLM Generator (cited, grounded answer; refuses if context is insufficient)
+[Phase 4, optional] Cross-Encoder Reranker (MiniLM / bge-reranker-base)
+      |              re-scores the fanout, keeps the top `top_k`
+      v
+Top-K Chunks
       |
+      v
+LiteLLM Generator (cited, grounded answer; refuses if context is insufficient;
+      |              model swappable via config)
       v
 API Response (answer, citations, retrieved_chunk_ids, latency_ms, usage, trace_id)
 ```
 
-`rag/protocols.py` defines this as four `typing.Protocol` contracts
-(`Chunker`, `Embedder`, `VectorStore`, `Generator`); `rag/pipeline.py`
-wires concrete implementations together via constructor injection, and
-`app/dependencies.py` builds that pipeline from `config.py`. Every
-component is swappable behind its Protocol without touching the others —
-this is the seam later phases (hybrid retrieval, rerankers, query
-rewriting, agents) will plug into.
+`rag/protocols.py` defines this as `typing.Protocol` contracts (`Chunker`,
+`Embedder`, `VectorStore`/`HybridVectorStore`, `Generator`, and - Phase 4 -
+`SparseEncoder`, `Reranker`, `QueryRewriter`); `rag/pipeline.py` wires
+concrete implementations together via constructor injection, and
+`app/dependencies.py`'s `build_pipeline(settings)` builds that pipeline
+from `config.py`. Every component is swappable behind its Protocol without
+touching the others, and every Phase 4 addition defaults to off/dense - a
+zero-arg `RagPipeline(...)` is byte-for-byte the Phase 1 baseline. See
+[Phase 4: Retrieval & generation experiments](#phase-4-retrieval--generation-experiments)
+below.
 
 ## Installation
 
@@ -306,17 +352,27 @@ uv run pytest -m "not integration" -v  # everything except integration tests
   the golden-set loader, every metric module (`retrieval`, `faithfulness`,
   `correctness`, `refusal`), the judge client, scorecard aggregation, and
   summary rendering — each tested against small fakes satisfying the
-  Protocols in `rag/protocols.py` or a fake judge. No network access, model
+  Protocols in `rag/protocols.py` or a fake judge. Phase 4 adds: RRF
+  (`test_fusion.py`), BM25 sparse encoding (`test_sparse.py`), the
+  cross-encoder reranker (`test_reranker.py`, fake `CrossEncoder`), the
+  query rewriter (`test_query_rewriter.py`, fake LiteLLM), hybrid-mode
+  pipeline orchestration (`test_pipeline.py`), the `build_pipeline(settings)`
+  factory (`test_dependencies.py`), the experiment framework's pure logic
+  (`test_experiment.py`), the labeling workflow (`test_label.py`), and
+  judge-agreement math (`test_agreement.py`). No network access, model
   download, or running Qdrant/LLM required.
 - `tests/integration/` — `test_qdrant_store.py` runs the real
   `qdrant-client` engine in `:memory:` mode (no server needed);
+  `test_qdrant_hybrid.py` does the same for Phase 4's named sparse vector,
+  BM25 search, and hybrid RRF fusion against the real Qdrant query engine;
   `test_pipeline_e2e.py` additionally downloads the real embedding model
   and asserts retrieval actually surfaces the right chunk for a real
-  question (skipped automatically if offline); `test_eval_run.py` runs
-  `eval.run`'s full async orchestration (dataset load → concurrent
-  pipeline+judge fan-out → scorecard → noise floor → file write → CLI
-  `main()`) against a fake pipeline and fake judge, proving every Phase 2
-  module works together correctly as a whole.
+  question (skipped automatically if offline); `test_experiment_e2e.py`
+  runs the Phase 4 experiment framework the same way, in both dense and
+  hybrid mode; `test_eval_run.py` runs `eval.run`'s full async orchestration
+  (dataset load → concurrent pipeline+judge fan-out → scorecard → noise
+  floor → file write → CLI `main()`) against a fake pipeline and fake
+  judge, proving every Phase 2 module works together correctly as a whole.
 - `tests/test_golden_set.py` — Phase 0's golden-set schema/integrity
   guardrail; unaffected by anything in this phase.
 
@@ -342,6 +398,13 @@ overridable with an `RAG_`-prefixed environment variable or `.env` file:
 | `RAG_JUDGE_MODEL` | `gpt-4o-mini` | LiteLLM model string used by the Phase 2 evaluation judge |
 | `RAG_JUDGE_TIMEOUT_SECONDS` | `60.0` | Per-call judge timeout |
 | `RAG_JUDGE_MAX_RETRIES` | `3` | Judge call retries (exponential backoff) before failing the question |
+| `RAG_RETRIEVAL_MODE` | `dense` | Phase 4: `dense` \| `sparse` \| `hybrid` |
+| `RAG_RRF_K` | `60` | Phase 4: Reciprocal Rank Fusion's rank-discount constant |
+| `RAG_RETRIEVAL_FANOUT` | `20` | Phase 4: candidates fetched before fusion/reranking narrows to `top_k` |
+| `RAG_RERANKER_ENABLED` | `false` | Phase 4: enable the cross-encoder reranking stage |
+| `RAG_RERANKER_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Phase 4: also accepts `BAAI/bge-reranker-base` |
+| `RAG_QUERY_REWRITE_ENABLED` | `false` | Phase 4: rewrite the retrieval query with an LLM before embedding |
+| `RAG_QUERY_REWRITE_MODEL` | `gpt-4o-mini` | Phase 4: LiteLLM model string used for query rewriting |
 | `RAG_LOG_LEVEL` | `INFO` | Logging verbosity |
 
 Provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) are read
@@ -395,10 +458,25 @@ citation in the API response.
 
 ## Logging
 
-Every request logs (with a shared `trace_id`): receipt, per-stage timing
-(embed/retrieve/generate/total), retrieved chunk IDs, citations, and any
-error, at `INFO` level by default (`RAG_LOG_LEVEL`). This is the
-observability seam later phases (tracing, metrics, dashboards) build on.
+Every request logs (with a shared `trace_id`): receipt (including
+`retrieval_mode`, whether reranking and query rewriting are active),
+per-stage timing (embed/retrieve/generate/total, with rerank/rewrite time
+folded into `retrieve`), retrieved chunk IDs, citations, and any error, at
+`INFO` level by default (`RAG_LOG_LEVEL`). This is the observability seam
+later phases (tracing, metrics, dashboards) build on.
+
+Phase 4 additionally logs (all at `INFO` unless noted):
+
+- `rag.stores.qdrant` — collection creation (dense vs. dense+sparse),
+  per-search result counts for dense/sparse/hybrid search, hybrid fusion's
+  dense/sparse/fused candidate counts (`DEBUG`).
+- `rag.reranker` / `rag.query_rewriter` — model load, and (`DEBUG`) how many
+  candidates were reranked / what a query was rewritten to.
+- `eval.experiment` — every experiment's name, mode, and full settings
+  overrides at start, and its indexed chunk count and measured metrics at
+  completion - the same information persisted to its JSON record, so a log
+  line and a saved experiment can always be cross-checked against each
+  other.
 
 ## Development workflow
 
@@ -638,25 +716,491 @@ once against a live deployment and record the resulting `evals/noise_floor.json`
 alongside this section for future reference before comparing any
 retrieval/generation change against it.
 
+## Phase 3: CI quality gate
+
+Phase 3 turns the Phase 2 evaluation harness into an automated regression
+gate: every pull request against `main` runs the full evaluation against
+the real production pipeline, compares the resulting scorecard to
+`evals/baseline.json`, and posts the comparison as a PR comment. A hard
+rule violation fails the build; a soft one is surfaced as a warning but
+never blocks merge. Merging to `main` re-runs the evaluation and promotes
+its scorecard to the new baseline, archiving the previous one under
+`evals/history/` forever.
+
+### Architecture
+
+```
+pull_request  ─────────────────────────────────────────────┐
+                                                             v
+                                          .github/workflows/eval-pr.yml
+                                             |
+                                             +-- uv sync, start Qdrant, rebuild index
+                                             +-- eval.run  ->  evals/results.json
+                                             +-- eval.compare --baseline evals/baseline.json
+                                             |                --candidate evals/results.json
+                                             |                --out comment.md
+                                             |     |
+                                             |     +--> eval.compare.GATE (hard/soft rules)
+                                             |     +--> eval.report.render_report()
+                                             |
+                                             +-- comment.md posted to the PR (upsert, not duplicate)
+                                             +-- evals/results.json + comment.md uploaded as artifacts
+                                             +-- exit 1 on any hard failure -> PR check fails
+
+push to main ────────────────────────────────────────────────┐
+                                                              v
+                                    .github/workflows/update-baseline.yml
+                                       |
+                                       +-- uv sync, start Qdrant, rebuild index
+                                       +-- eval.run  ->  evals/results.json
+                                       +-- archive evals/history/<date>.json (never overwritten)
+                                       +-- promote evals/results.json -> evals/baseline.json
+                                       +-- commit + push "[skip ci]"
+```
+
+### Scorecard comparison engine (`eval/compare.py`)
+
+`Rule(metric, max_drop=None, max_absolute=None, max_increase_pct=None,
+hard=True)` describes one bound on one dotted scorecard metric (e.g.
+`"generation.faithfulness"`). `compare_scorecards(baseline, candidate)`
+evaluates every rule in the active `GATE` list and also computes a
+noise-floor-aware status (🟢/🟡/🔴) for every headline metric, whether or
+not a `GATE` rule happens to cover it — the noise floor comes from the
+baseline's own measured `noise_floor` section when present (a
+`--repeats > 1` run), falling back to a hardcoded table otherwise. `main()`
+exits `1` if any `hard=True` rule triggers, `0` otherwise:
+
+```bash
+uv run python -m eval.compare \
+  --baseline evals/baseline.json \
+  --candidate evals/results.json \
+  --out comment.md
+```
+
+### Gate rules
+
+| Metric | Bound | Hard? | Rationale |
+|---|---|---|---|
+| `safety.fabrications` | `max_absolute=0` | ✅ hard | Any fabrication on a required-refusal question is a hallucination-adjacent safety incident — zero tolerance regardless of magnitude elsewhere. |
+| `generation.faithfulness` | `max_drop=0.05` | ✅ hard | ≈2× the estimated per-claim faithfulness noise floor (~0.025 stdev, see below) — a drop that size is a real hallucination regression, not judge jitter. |
+| `retrieval.recall_at_5` | `max_drop=0.03` | ✅ hard | ≈2× the estimated hit-rate noise floor (~0.015 stdev) — retrieval is deterministic, so its noise floor (and this threshold) is the tightest of the four hard rules. |
+| `safety.refusal_rate` | `max_drop=0.10` | ✅ hard | Refusal is judged over a small subset of the golden set (only `unanswerable`/`false_premise` questions), so a single flipped verdict moves this metric a lot more than the others — the threshold is wider (≈2× a ~0.05 stdev) to avoid failing the gate on one borderline judge call, while still catching a systematic regression like a missing refusal instruction. |
+| `ops.mean_cost_usd` | `max_increase_pct=25` | ⚠️ soft | Cost drifts with provider pricing and prompt length changes that aren't regressions; flagged for review, never blocking. |
+| `ops.p95_latency_ms` | `max_increase_pct=30` | ⚠️ soft | Same reasoning as cost — infra/network variance is real and shouldn't block a merge on its own. |
+
+**Noise floor requirement:** each hard threshold above is set to
+approximately **2× the standard deviation** `eval.scorecard.compute_noise_floor()`
+would measure for that metric across repeated runs (`eval.run --repeats 5`)
+— large enough that ordinary judge/generator non-determinism can't
+accidentally trip the gate, small enough to still catch a real regression.
+`evals/baseline.json` currently ships with an estimated `noise_floor`
+section (documented in its own `_note` field) rather than a measured one,
+since this environment has no live Qdrant instance or LLM provider
+credentials configured (see "Noise floor methodology" above); once
+`update-baseline.yml` runs against real credentials, its promoted baseline
+carries a measured `noise_floor` and `eval.compare` automatically prefers
+it over the hardcoded fallback table.
+
+### PR report format (`eval/report.py`)
+
+`render_report()` turns a `ComparisonResult` into the exact markdown posted
+to the PR: a per-section (Retrieval/Generation/Safety/Operations) table of
+`Metric | Baseline | Candidate | Delta | Status`, followed by a **Gate
+Results** section listing 🚫 hard failures, ⚠️ warnings, and ✅ passed rules
+separately. Status icons: 🟢 improved, 🟡 within noise floor, 🔴 regression
+(no gate rule covers that metric, or it's covered but didn't trigger), 🚫
+gate failure (a hard rule triggered on that exact metric).
+
+### PR evaluation workflow (`.github/workflows/eval-pr.yml`)
+
+Runs on every `pull_request` targeting `main`. A `tests` job (no secrets,
+runs for fork PRs too) lints and runs the unit suite; a gated `eval` job
+(only for same-repo PRs, so a fork can never see the provider keys) starts
+a Qdrant service container, restores the `uv` and HuggingFace-model caches,
+rebuilds the index, runs `eval.run`, runs `eval.compare`, upserts one PR
+comment with the report (updated in place on new commits, never
+duplicated), uploads `evals/results.json` + `comment.md` as build
+artifacts, and fails the job if `eval.compare` exited non-zero. If the
+`GENERATOR_API_KEY` secret isn't configured, the evaluation step is skipped
+entirely and a comment explains why — a missing secret is a CI
+configuration gap, not a quality regression, and shouldn't be reported as
+one.
+
+### Baseline promotion workflow (`.github/workflows/update-baseline.yml`)
+
+Runs on every `push` to `main` (skipped if the commit message contains
+`[skip ci]`, which is how the workflow avoids re-triggering itself on its
+own baseline-promotion commit). Re-runs the same evaluation, archives the
+resulting scorecard as `evals/history/<UTC date>.json` — never overwriting
+an existing file for that date, appending a `-HHMMSS` suffix instead if one
+already exists — then copies it over `evals/baseline.json` and pushes a
+`[skip ci]` commit.
+
+### History tracking
+
+`evals/history/` accumulates one scorecard per promoted baseline, forever —
+each carries the same fields as any other scorecard (`git_sha`,
+`timestamp`, `config`, `retrieval`/`generation`/`safety`/`ops`,
+`per_question`), so retrieval quality, faithfulness, cost, and latency can
+all be plotted over time just by loading every file in the directory in
+timestamp order. `evals/baseline.json` is always a copy of the most recent
+history entry.
+
+### Interpreting reports
+
+- **🚫 Gate Failed** at the top of a report means at least one hard rule
+  triggered — merge is blocked until the regression is fixed or the change
+  is reverted.
+- **✅ Gate Passed** with warnings present means a soft rule (cost/latency)
+  moved outside its bound — worth a look, not a blocker.
+- A 🟡 row with no gate line under "Gate Results" for that metric means the
+  movement is smaller than the estimated noise floor — likely not a real
+  change at all.
+
+### Failure examples
+
+`tests/unit/test_gate_regressions.py` encodes the three regression
+scenarios the gate must catch, each asserting the specific `GATE` rule that
+fires:
+
+1. **`top_k` dropped to 1** — recall/MRR/nDCG collapse; `retrieval.recall_at_5`
+   (`max_drop=0.03`) fails.
+2. **The "refuse if the answer isn't in context" instruction removed from
+   the generation prompt** — `safety.refusal_rate` (`max_drop=0.10`) and
+   `safety.fabrications` (`max_absolute=0`) both fail together, matching
+   what actually happens when that instruction is dropped.
+3. **A single fabrication introduced** — `safety.fabrications` alone fails
+   even when every other metric is untouched, proving the zero-tolerance
+   rule doesn't need a large score movement to catch it.
+
+A fourth test (`test_healthy_change_passes_gate`) proves a genuine
+improvement passes clean, so the gate isn't just failing everything.
+
+## Phase 4: Retrieval & generation experiments
+
+Phase 4's rule, restated: **no improvement is accepted unless it's
+measured** against the Phase 2 harness/golden set, and a bad result is kept
+and reported, not hidden. Every technique below is off/at its Phase 1
+default unless explicitly configured on - `RagPipeline(...)` with no Phase
+4 keyword arguments is byte-for-byte the Phase 1 baseline (see
+`tests/unit/test_pipeline.py`).
+
+**What's measured for real vs. documented only:** this development
+environment has no running Qdrant server and no LLM provider API key
+configured (no `.env`; see "Noise floor methodology" in Phase 2). That
+makes every *retrieval-only* metric (Recall@5/MRR/nDCG@10, retrieval
+latency) measurable for real right here - `eval/experiment.py`'s
+`retrieve()` path needs no LLM call at all, only the real embedding model
+and a real (in-memory) Qdrant engine. Anything touching generation
+(faithfulness, correctness, refusal, cost, or a generator/query-rewrite
+comparison) needs a live LLM provider key and is documented as such below;
+the code, config, and tests for those paths are complete and exercised
+with fakes, they're just never claimed to have a measured number this
+environment can't produce.
+
+### 1. Hybrid retrieval: dense, sparse (BM25), and RRF fusion
+
+`rag/sparse.py`'s `BM25Vectorizer` fits a vocabulary/IDF table from the
+indexed corpus and encodes documents/queries into the sparse
+`(indices, values)` vectors Qdrant's sparse vector index expects.
+`rag/stores/qdrant.py`'s `QdrantVectorStore(enable_sparse=True)`
+provisions a named `"dense"` vector alongside a named `"sparse"` one on the
+*same* collection, so `search`, `search_sparse`, and `search_hybrid` are
+all available side by side. `rag/fusion.py` implements Reciprocal Rank
+Fusion exactly as specified:
+
+```python
+def reciprocal_rank_fusion(rankings: list[list[str]], k: int = 60) -> list[tuple[str, float]]:
+    scores: defaultdict[str, float] = defaultdict(float)
+    for ranking in rankings:
+        for rank, doc_id in enumerate(ranking, start=1):
+            scores[doc_id] += 1.0 / (k + rank)
+    return sorted(scores.items(), key=lambda kv: -kv[1])
+```
+
+`search_hybrid` runs the dense and sparse branches independently (each
+fetching `retrieval_fanout` candidates), fuses their rank-ordered chunk-id
+lists with this function, and returns the top `top_k` with `.score`
+overwritten by the fused RRF score (dense cosine similarity and BM25
+weight aren't on comparable scales, so keeping either raw score would be
+misleading). All three modes are selected purely through
+`RAG_RETRIEVAL_MODE` (`dense` | `sparse` | `hybrid`) - no retrieval mode is
+hardcoded anywhere in `rag/pipeline.py`.
+
+### 2. Cross-encoder reranking
+
+`rag/reranker.py`'s `CrossEncoderReranker` wraps
+`sentence_transformers.CrossEncoder`. When `RAG_RERANKER_ENABLED=true`,
+`RagPipeline.retrieve()` fetches `RAG_RETRIEVAL_FANOUT` (default 20)
+candidates from whichever retrieval mode is active, scores every
+`(query, chunk.text)` pair with the cross-encoder, and keeps the top
+`RAG_TOP_K` - exactly the `Query -> top-20 -> cross-encoder -> top-5 ->
+generator` pipeline the spec calls for. `RAG_RERANKER_MODEL` defaults to
+`cross-encoder/ms-marco-MiniLM-L-6-v2` and also accepts
+`BAAI/bge-reranker-base` as a drop-in alternative.
+
+### 3. Embedding model experiments
+
+`RAG_EMBEDDING_MODEL_NAME` was already config-driven from Phase 1
+(`rag/embedders/local.py` takes any `sentence-transformers`-compatible
+model string); Phase 4 adds `eval/experiment.py` as the harness to actually
+compare models against the golden set instead of assuming a bigger model
+is better. The required comparison - `BAAI/bge-small-en-v1.5` (baseline) vs.
+`Qwen/Qwen3-Embedding-0.6B` - is wired up and runnable
+(`--override embedding_model_name=Qwen/Qwen3-Embedding-0.6B`), but a
+0.6B-parameter model's download/CPU-inference cost was out of this
+environment's time budget to run to completion; treat that specific
+comparison as configured-but-not-yet-measured here, not skipped in the
+code.
+
+### 4. Chunking experiments
+
+Measured for real (`scripts/run_phase4_experiments.py`, retrieval-only:
+Recall@5/MRR/nDCG@10 + latency), each rebuilding a fresh index against the
+real corpus and real golden set:
+
+| Chunk size | Overlap | Recall@5 | MRR | nDCG@10 |
+|---|---|---|---|---|
+| 512 (baseline) | 15% | 0.700 | 0.603 | 0.588 |
+| 512 | 0% | 0.650 | 0.553 | 0.528 |
+| 512 | 20% | 0.675 | 0.581 | 0.566 |
+| 1024 | 15% | 0.700 | 0.604 | 0.587 |
+| 1024 | 0% | 0.725 | 0.608 | 0.590 |
+| 1024 | 20% | 0.725 | 0.607 | 0.591 |
+
+**What the data shows, honestly:** dropping overlap to 0% at the baseline
+512-token chunk size is a clear *regression* (Recall@5 -0.050, nDCG@10
+-0.060) - overlap is load-bearing at this chunk size for this corpus, most
+likely because 512-token chunks often split a fact from the sentence that
+answers a golden-set question, and overlap is what keeps both halves
+retrievable. Going the other way (512/20%, more overlap than baseline) is
+*also* worse than the 15% baseline, not better - so more overlap isn't
+monotonically good either; 15% looks close to a local optimum at this
+chunk size, not just "not yet enough." At 1024 tokens, overlap matters far
+less (0%, 15%, and 20% are all within ~0.001-0.002 of each other) because
+a 1024-token chunk is large enough relative to this corpus's paragraph
+length that overlap has little left to buy - and 1024-token chunking
+overall is a small, real improvement over the 512-token baseline
+(Recall@5 +0.025) on this corpus. Neither direction was hidden to make a
+cleaner story.
+
+### 5. Top-K experiments
+
+`RAG_TOP_K` was already config-driven from Phase 1; measured here for real
+at 3, 5 (baseline), and 10 - see the results table.
+
+### 6. Query rewriting
+
+`rag/query_rewriter.py`'s `LiteLLMQueryRewriter` rewrites the *retrieval*
+query only (the generator always receives the user's original question -
+`tests/unit/test_pipeline.py::test_query_rewriter_changes_the_embedded_query_only`
+asserts this directly), falls back to the original question on any LLM
+error or empty output, and is toggled purely by `RAG_QUERY_REWRITE_ENABLED`.
+Its effect on `multi_hop` questions specifically needs the LLM to actually
+rewrite queries, which needs a live provider key this environment doesn't
+have configured - the code path and its fallback behavior are unit-tested
+with a fake LiteLLM call, but the real before/after `multi_hop` numbers are
+not measured here.
+
+### 7. Generator model experiments
+
+`RAG_LLM_MODEL` (any LiteLLM-supported model string) was already
+config-driven from Phase 1. `eval/experiment.py`'s `mode="full"` runs the
+complete Phase 2 scorecard (correctness/faithfulness/cost/latency) against
+whichever generator a settings override points at, so comparing generators
+is a one-line `--override llm_model=...` away - but, like every
+`mode="full"` experiment, it requires a live LLM provider key this
+environment doesn't have. Not measured here.
+
+### 8. Reranker model comparison (MiniLM vs. bge-reranker-base)
+
+The retrieval-side effect (does reranking change *which* chunks end up in
+the top 5, and by how much) is measured for real - see `reranker_minilm` in
+the results table below. The faithfulness/correctness trade-off between the
+two reranker models needs `mode="full"` (an LLM judge), which is not
+measured here for the reason above; `tests/unit/test_reranker.py` proves
+both model names wire through `CrossEncoderReranker` identically.
+
+### 9. Experiment framework
+
+`eval/experiment.py`'s `run_experiment(spec)` builds a fresh, independent
+`RagPipeline` from `ExperimentSpec.overrides`, re-indexes a fresh in-memory
+(or real, if `RAG_QDRANT_URL` points at one) Qdrant collection so
+index-affecting overrides (chunk size, embedding model) are actually
+reflected in what gets searched, evaluates it (`retrieval_only` - no LLM
+needed - or `full` - complete Phase 2 scorecard), and writes a
+self-contained JSON record under `experiments/<name>/<timestamp>.json`
+(plus a `latest.json`) carrying:
+
+```json
+{
+  "experiment": "hybrid_rrf",
+  "description": "...",
+  "mode": "retrieval_only",
+  "git_sha": "a1b2c3d",
+  "timestamp": "2026-09-14T14:55:12Z",
+  "overrides": {"qdrant_url": ":memory:", "retrieval_mode": "hybrid"},
+  "config": {"embedder": "...", "top_k": 5, "retrieval_mode": "hybrid", "rerank": false, "...": "..."},
+  "metrics": {"retrieval": {"recall_at_5": 0.725, "mrr": 0.635, "ndcg_at_10": 0.622}, "ops": {"...": "..."}},
+  "per_question": ["..."]
+}
+```
+
+Every field needed to reproduce the run - git SHA, timestamp, exact
+config, measured metrics, and the raw per-question evaluation output - is
+in the one file, so a later reader never has to guess what was actually
+run. `scripts/run_phase4_experiments.py` defines and runs the full
+retrieval-only battery behind the results table below in one command:
+
+```bash
+uv run python -m scripts.run_phase4_experiments
+```
+
+or a single ad hoc experiment via the CLI:
+
+```bash
+uv run python -m eval.experiment --name my_experiment \
+  --override retrieval_mode=hybrid --override top_k=8
+```
+
+### 10. Results table (measured)
+
+Every row below was actually run in this environment against the real
+59-document corpus and the real 50-question golden set (retrieval-only:
+Recall@5/MRR/nDCG@10, no LLM call) - raw records are under
+`experiments/<name>/latest.json`. **Bad results are kept, not hidden** -
+`chunk_512_overlap0` and the top-k experiments below are reported exactly
+as measured, including the ones that got worse.
+
+| Experiment | Recall@5 | MRR | nDCG@10 | Metric impact vs. `baseline_dense` |
+|---|---|---|---|---|
+| `baseline_dense` (Phase 1) | 0.700 | 0.603 | 0.588 | — (reference) |
+| `sparse_bm25` | 0.700 | 0.640 | 0.618 | +0.0 Recall@5, +3.7 MRR, +3.0 nDCG@10 |
+| `hybrid_rrf` | 0.725 | 0.635 | 0.622 | **+2.5 Recall@5, +3.2 MRR, +3.4 nDCG@10** |
+| `reranker_minilm` | 0.700 | 0.663 | 0.630 | +0.0 Recall@5, **+6.0 MRR**, +4.2 nDCG@10, **+4.7s p95 latency** |
+| `chunk_1024_overlap15` | 0.700 | 0.604 | 0.587 | +0.0 Recall@5 (no real effect) |
+| `chunk_512_overlap0` | 0.650 | 0.553 | 0.528 | **-5.0 Recall@5, -5.0 MRR, -6.0 nDCG@10** |
+| `chunk_512_overlap20` | 0.675 | 0.581 | 0.566 | -2.5 Recall@5, -2.2 MRR, -2.2 nDCG@10 |
+| `chunk_1024_overlap0` | 0.725 | 0.608 | 0.590 | +2.5 Recall@5, +0.5 MRR, +0.2 nDCG@10 |
+| `chunk_1024_overlap20` | 0.725 | 0.607 | 0.591 | +2.5 Recall@5, +0.4 MRR, +0.3 nDCG@10 |
+| `top_k_3` | 0.650 | 0.592 | 0.572 | **-5.0 Recall@5**, -1.1 MRR, -1.6 nDCG@10 |
+| `top_k_10` | 0.700 | 0.620 | 0.630 | +0.0 Recall@5, +1.7 MRR, **+4.2 nDCG@10** |
+
+(Impact columns in percentage points, e.g. "+2.5 Recall@5" = +0.025 absolute.
+Bold marks the largest/most notable movements, both good and bad.)
+
+**Reading these honestly:** `hybrid_rrf` is the one clear, broad win -
+every metric improved, for free (no extra model, no latency cost beyond a
+second cheap BM25 search). `reranker_minilm` buys the single largest MRR
+gain in the whole battery, but at a **p95 latency of ~4.7 seconds** (CPU
+cross-encoder inference over 20 candidates) - whether that trade is worth
+it depends entirely on the product's latency budget, which this table
+deliberately doesn't decide for you. `top_k=10` shows the exact pattern
+the spec calls out: it doesn't move Recall@5 *at all* (Recall@5 is capped
+at whatever's in the top 5 regardless of how many more are fetched) while
+still improving MRR and nDCG@10, because those two metrics DO credit a
+relevant chunk found at rank 6-10 that Recall@5 structurally cannot -
+proof that "higher recall" and "better ranking quality" are genuinely
+different things to validate separately, not restatements of each other.
+`top_k=3` and `chunk_512_overlap0` are real regressions, reported exactly
+as measured.
+
+Not measured here (needs a live LLM provider key and/or a larger model
+download this environment's time budget didn't cover - see each numbered
+section above for exactly which): the `embedding_qwen3` comparison,
+`bge-reranker-base` vs. MiniLM's faithfulness/correctness trade-off, query
+rewriting's effect on `multi_hop` correctness, and any generator-model
+comparison.
+
+### 11-12. Judge validation: `scripts/label.py` + human-vs-judge agreement
+
+`scripts/label.py` samples ~40 answers (seeded, so the sample is
+reproducible - `sample_questions(..., seed=42)`) from an `eval.run`
+scorecard's `per_question`, and walks a human labeler through each one
+(question, reference answer, generated answer, and the judge's own
+verdict) collecting a `correct`/`incorrect`/`partial` label:
+
+```bash
+uv run python -m scripts.label --scorecard evals/results.json
+```
+
+Labels persist to `evals/labels/human_labels.jsonl`, keyed by question id
+- re-running the command skips anything already labeled, so a labeling
+session is safe to interrupt and resume. `eval/agreement.py` then computes
+percentage agreement and Cohen's kappa (both implemented from first
+principles - no `scikit-learn` dependency) between the human and judge
+labels:
+
+```python
+kappa = (p_observed - p_expected) / (1 - p_expected)
+```
+
+where `p_expected` comes from each rater's own marginal label frequencies
+(standard unweighted two-rater Cohen's kappa). Per the spec: **agreement
+below 80% means the judging rubric should be reviewed first - it does not
+by itself mean the pipeline regressed.**
+`eval.agreement.AgreementReport.needs_rubric_review` encodes exactly that
+80% threshold.
+
+**Methodology note:** producing a real agreement/kappa number requires
+first running `eval.run` against a live LLM provider to get judge verdicts
+to compare against (see "What's measured for real" above) - not available
+in this environment. The sampling, labeling, persistence, and
+percentage-agreement/kappa computation are all implemented and fully unit
+tested (`tests/unit/test_label.py`, `tests/unit/test_agreement.py`,
+including a hand-computed kappa value checked against the formula above);
+what's missing is a real judge scorecard to point them at. Once one
+exists, `uv run python -m scripts.label` followed by
+`eval.agreement.build_agreement_report(human_labels, judge_labels)` produces
+the sample size, percentage agreement, and kappa this section is meant to
+document.
+
+### 13. Testing
+
+Every new Phase 4 module has unit tests against fakes (no model/Qdrant/LLM
+calls) plus, where a real engine or real model weights matter, an
+integration test - see the updated "Running tests" section above for the
+full breakdown by file. `tests/unit/test_gate_regressions.py` (Phase 3) and
+`tests/test_golden_set.py` (Phase 0) are unaffected and still pass
+unchanged, proving Phase 4 didn't regress anything earlier phases built.
+
+### 14. Logging
+
+See the updated "Logging" section above.
+
+### 15. Final validation
+
+- ✅ `uv run pytest` (full suite, unit + integration + golden set) passes.
+- ✅ `uv run ruff check .` and `uv run mypy` are clean.
+- ✅ The Phase 3 CI gate (`tests/unit/test_gate_regressions.py`) still
+  passes unmodified - Phase 4 changed nothing about how the gate itself
+  works, only what the pipeline underneath it can be configured to do.
+- ✅ The retrieval-only experiment battery above ran against the real
+  corpus and golden set and is recorded under `experiments/`.
+- ⚠️ No experiment here was promoted to `evals/baseline.json` - that file
+  still reflects the Phase 1 dense baseline. Promoting a Phase 4
+  configuration (e.g. `hybrid_rrf`) to production is a deliberate decision
+  for whoever owns this system to make once a `mode="full"` scorecard (with
+  real faithfulness/correctness numbers) is measured against a live LLM
+  provider, not something this phase does unilaterally.
+
 ## Future phases roadmap
 
 Phase 1 was intentionally the simplest possible production-quality
 baseline: single-stage dense retrieval, no reranking, no query rewriting,
-no agents. Phase 2 (this phase) built the evaluation harness that measures
-it. Future phases build on both:
+no agents. Phase 2 built the evaluation harness that measures it, Phase 3
+turned that harness into the CI gate that protects it going forward, and
+Phase 4 (this phase) added the retrieval/generation techniques Phase 1
+explicitly excluded - each one measured with the Phase 2 harness (or, for
+retrieval-only changes, the Phase 4 experiment framework), and protected
+going forward by the Phase 3 gate once a scorecard is promoted to
+`evals/baseline.json`. See
+[Phase 4: Retrieval & generation experiments](#phase-4-retrieval--generation-experiments)
+below.
 
-- **Phase 3 — Retrieval/generation improvements**: hybrid retrieval,
-  rerankers, query rewriting, and other techniques explicitly excluded from
-  the Phase 1 baseline — each one measured with the Phase 2 harness against
-  the Phase 1 baseline it's meant to improve on, and required to clear the
-  measured noise floor before being called an improvement.
-- **Phase 4 — Regression harness / CI**: run `eval.run` against the live
-  `/query` endpoint automatically on every change, tracking scorecards over
-  time so regressions in retrieval, faithfulness, correctness, or refusal
-  behavior are caught before merge rather than discovered in production.
-- **Beyond that**: graph RAG, agentic retrieval, and other techniques not
-  yet in scope — each still measured the same way, against the same
-  golden set, through the same harness.
+**Beyond that**: graph RAG, agentic retrieval, and other techniques not yet
+in scope — each still measured the same way, against the same golden set,
+through the same harness, gated the same way.
 
 Each future phase should keep `tests/test_golden_set.py` and every prior
 phase's test suite green — they are the guardrails that keep the benchmark,

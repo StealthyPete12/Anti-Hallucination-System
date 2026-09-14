@@ -191,7 +191,9 @@ def evaluate_rule(
     value never triggers (there's nothing to compare) but is reported as
     skipped so a silently-absent metric doesn't read as a silent pass."""
     if baseline_value is None or candidate_value is None:
-        return RuleResult(rule, baseline_value, candidate_value, None, False, "skipped: missing value")
+        return RuleResult(
+            rule, baseline_value, candidate_value, None, False, "skipped: missing value"
+        )
 
     delta = float(candidate_value) - float(baseline_value)
     reasons: list[str] = []
@@ -220,20 +222,22 @@ def _status_for(metric: str, delta: float, noise_floor: float) -> str:
     return "improved" if signed > 0 else "regression"
 
 
-def build_metric_rows(
-    baseline: dict[str, Any], candidate: dict[str, Any]
-) -> list[MetricRow]:
+def build_metric_rows(baseline: dict[str, Any], candidate: dict[str, Any]) -> list[MetricRow]:
     rows: list[MetricRow] = []
     for section, label, metric in REPORT_METRICS:
         baseline_value = get_metric(baseline, metric)
         candidate_value = get_metric(candidate, metric)
         if baseline_value is None or candidate_value is None:
-            rows.append(MetricRow(section, label, metric, baseline_value, candidate_value, None, "no_data"))
+            rows.append(
+                MetricRow(section, label, metric, baseline_value, candidate_value, None, "no_data")
+            )
             continue
         delta = float(candidate_value) - float(baseline_value)
         noise_floor = get_noise_floor(metric, baseline)
         status = _status_for(metric, delta, noise_floor)
-        rows.append(MetricRow(section, label, metric, baseline_value, candidate_value, delta, status))
+        rows.append(
+            MetricRow(section, label, metric, baseline_value, candidate_value, delta, status)
+        )
     return rows
 
 

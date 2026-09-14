@@ -27,7 +27,8 @@ def test_report_includes_all_sections() -> None:
     candidate = make_scorecard()
     result = compare_scorecards(baseline, candidate)
     report = render_report(result, baseline, candidate)
-    for heading in ("## Retrieval", "## Generation", "## Safety", "## Operations", "## Gate Results"):
+    headings = ("## Retrieval", "## Generation", "## Safety", "## Operations", "## Gate Results")
+    for heading in headings:
         assert heading in report
 
 

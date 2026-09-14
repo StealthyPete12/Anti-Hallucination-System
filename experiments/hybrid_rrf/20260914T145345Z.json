@@ -1,0 +1,884 @@
+{
+  "experiment": "hybrid_rrf",
+  "description": "Dense + BM25 sparse, fused with Reciprocal Rank Fusion (Phase 4 section 1).",
+  "mode": "retrieval_only",
+  "git_sha": "08e40ff",
+  "timestamp": "2026-09-14T14:53:45Z",
+  "overrides": {
+    "qdrant_url": ":memory:",
+    "qdrant_collection_name": "exp_hybrid_rrf",
+    "retrieval_mode": "hybrid"
+  },
+  "config": {
+    "embedder": "BAAI/bge-small-en-v1.5",
+    "generator": "gpt-4o-mini",
+    "judge": "gpt-4o-mini",
+    "judge_prompt_hash": {
+      "faithfulness_v1": "6cc0242b9917729d8423687c394e0410bcae70b67351f6505e8578df1a3635bc",
+      "correctness_v1": "e4ba7eb0dcf4f50d0e8f38b99f78a214ab7cf4971300788b9abc632d0f299658",
+      "refusal_v1": "dc87817cdb7b922acc72a84947b95cd7124be3b81b2d123b80b004a51de92e2d"
+    },
+    "top_k": 5,
+    "retrieval_mode": "hybrid",
+    "rerank": false,
+    "reranker_model": null,
+    "query_rewrite": false
+  },
+  "metrics": {
+    "retrieval": {
+      "recall_at_5": 0.725,
+      "mrr": 0.6354166666666667,
+      "ndcg_at_10": 0.6216994999864156
+    },
+    "ops": {
+      "mean_embed_latency_ms": 42.98,
+      "p95_retrieve_latency_ms": 47.815
+    },
+    "num_questions": 50
+  },
+  "per_question": [
+    {
+      "id": "q001",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_tutorial_arch#0",
+        "postgres_client_authentication#0",
+        "postgres_backup_dump#1",
+        "postgres_tutorial_createdb#0",
+        "postgres_tutorial_createdb#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_tutorial_arch#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q002",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_tutorial_delete#0",
+        "postgres_queries_with#9",
+        "postgres_ddl_inherit#0",
+        "postgres_tutorial_select#1",
+        "postgres_tutorial_createdb#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_tutorial_delete#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q003",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_dml_returning#0",
+        "postgres_functions_json#54",
+        "postgres_functions_window#3",
+        "postgres_transaction_iso#0",
+        "postgres_tutorial_accessdb#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_dml_returning#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q004",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_numeric#7",
+        "postgres_queries_table_expressions#12",
+        "postgres_ddl_default#0",
+        "postgres_datatype_numeric#6",
+        "postgres_dml_returning#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_default#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg_at_10": 0.5
+    },
+    {
+      "id": "q005",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_partitioning#15",
+        "postgres_ddl_partitioning#17",
+        "postgres_ddl_system_columns#1",
+        "postgres_ddl_partitioning#3",
+        "postgres_ddl_inherit#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_system_columns#0"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q006",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_alter#0",
+        "postgres_ddl_default#0",
+        "postgres_ddl_system_columns#1",
+        "postgres_functions_window#3",
+        "postgres_transaction_iso#3"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_alter#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q007",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_schemas#2",
+        "postgres_ddl_schemas#3",
+        "postgres_ddl_schemas#7",
+        "postgres_ddl_schemas#6",
+        "postgres_ddl_schemas#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_schemas#5"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q008",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_types#0",
+        "postgres_indexes_intro#1",
+        "postgres_tutorial_table#0",
+        "postgres_ddl_partitioning#12",
+        "postgres_indexes_intro#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_types#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q009",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_types#0",
+        "postgres_indexes_types#1",
+        "postgres_indexes_partial#3",
+        "postgres_ddl_constraints#10",
+        "postgres_indexes_intro#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_types#1"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.5,
+      "ndcg_at_10": 0.6309297535714575
+    },
+    {
+      "id": "q010",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_multicolumn#1",
+        "postgres_indexes_multicolumn#0",
+        "postgres_tutorial_agg#0",
+        "postgres_indexes_partial#3",
+        "postgres_datatype_numeric#5"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_multicolumn#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.5,
+      "ndcg_at_10": 0.6309297535714575
+    },
+    {
+      "id": "q011",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_unique#0",
+        "postgres_indexes_partial#4",
+        "postgres_indexes_partial#3",
+        "postgres_ddl_partitioning#8",
+        "postgres_indexes_intro#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_unique#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q012",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_partial#1",
+        "postgres_indexes_partial#0",
+        "postgres_runtime_config_connection#1",
+        "postgres_runtime_config_connection#3",
+        "postgres_indexes_partial#4"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_partial#1"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q013",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#0",
+        "postgres_explicit_locking#8",
+        "postgres_queries_order#1",
+        "postgres_mvcc_caveats#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_mvcc_intro#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q014",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_mvcc_caveats#0",
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#0",
+        "postgres_explicit_locking#8",
+        "postgres_ddl_inherit#5"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_mvcc_caveats#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q015",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_transaction_iso#0",
+        "postgres_transaction_iso#7",
+        "postgres_transaction_iso#5",
+        "postgres_transaction_iso#10",
+        "postgres_transaction_iso#6"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_transaction_iso#2"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q016",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_explicit_locking#1",
+        "postgres_explicit_locking#4",
+        "postgres_explicit_locking#0",
+        "postgres_explicit_locking#2",
+        "postgres_explicit_locking#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_explicit_locking#3"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q017",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_role_attributes#0",
+        "postgres_role_attributes#2",
+        "postgres_role_membership#1",
+        "postgres_role_attributes#1",
+        "postgres_role_membership#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_role_attributes#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q018",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_role_membership#0",
+        "postgres_role_membership#1",
+        "postgres_role_attributes#3",
+        "postgres_user_manag#0",
+        "postgres_role_attributes#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_role_membership#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q019",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_client_authentication#0",
+        "postgres_role_attributes#2",
+        "postgres_role_attributes#0",
+        "postgres_ddl_schemas#9",
+        "postgres_datatype_json#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_client_authentication#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q020",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_high_availability#1",
+        "postgres_runtime_config_connection#2",
+        "postgres_mvcc_caveats#0",
+        "postgres_high_availability#0",
+        "postgres_tutorial_arch#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_high_availability#1"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q021",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_uuid#0",
+        "postgres_datatype_numeric#2",
+        "postgres_datatype_character#4",
+        "postgres_datatype_net_types#0",
+        "postgres_datatype_character#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_datatype_uuid#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q022",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_enum#2",
+        "postgres_datatype_numeric#2",
+        "postgres_datatype_enum#0",
+        "postgres_datatype_character#4",
+        "postgres_datatype_character#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_datatype_enum#2"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q023",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#1",
+        "postgres_runtime_config_connection#7",
+        "postgres_runtime_config_connection#2",
+        "postgres_runtime_config_connection#6",
+        "postgres_tutorial_arch#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_runtime_config_connection#0"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q024",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#1",
+        "postgres_runtime_config_connection#2",
+        "postgres_runtime_config_connection#4",
+        "postgres_ddl_constraints#8",
+        "postgres_runtime_config_connection#3"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_runtime_config_connection#0"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q025",
+      "type": "single_hop",
+      "retrieved_chunk_ids": [
+        "postgres_backup_file#1",
+        "postgres_backup_file#2",
+        "postgres_backup_file#0",
+        "postgres_backup_file#3",
+        "postgres_tutorial_arch#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_backup_file#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.3333333333333333,
+      "ndcg_at_10": 0.5
+    },
+    {
+      "id": "q026",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#8",
+        "postgres_explicit_locking#0",
+        "postgres_backup_file#2",
+        "postgres_transaction_iso#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 0.9197207891481876
+    },
+    {
+      "id": "q027",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_role_attributes#1",
+        "postgres_role_attributes#3",
+        "postgres_role_membership#1",
+        "postgres_role_attributes#2",
+        "postgres_ddl_schemas#4"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_role_attributes#4",
+        "postgres_role_membership#2"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q028",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_numeric#7",
+        "postgres_transaction_iso#1",
+        "postgres_transaction_iso#7",
+        "postgres_transaction_iso#8",
+        "postgres_datatype_numeric#6"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_default#0",
+        "postgres_transaction_iso#2"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q029",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_client_authentication#0",
+        "postgres_tutorial_arch#0",
+        "postgres_runtime_config_connection#8",
+        "postgres_runtime_config_connection#9",
+        "postgres_runtime_config_connection#14"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_tutorial_arch#1",
+        "postgres_client_authentication#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 0.6131471927654584
+    },
+    {
+      "id": "q030",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_unique#0",
+        "postgres_functions_json#11",
+        "postgres_indexes_expressional#0",
+        "postgres_indexes_intro#2",
+        "postgres_ddl_partitioning#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_types#0",
+        "postgres_indexes_unique#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 0.6131471927654584
+    },
+    {
+      "id": "q031",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_mvcc_caveats#0",
+        "postgres_explicit_locking#0",
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#4",
+        "postgres_explicit_locking#8"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_mvcc_caveats#0",
+        "postgres_explicit_locking#0",
+        "postgres_explicit_locking#3"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 0.7653606369886217
+    },
+    {
+      "id": "q032",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_numeric#7",
+        "postgres_ddl_default#0",
+        "postgres_datatype_numeric#6",
+        "postgres_dml_returning#0",
+        "postgres_ddl_constraints#5"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_dml_returning#0",
+        "postgres_ddl_default#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.5,
+      "ndcg_at_10": 0.6509209298071326
+    },
+    {
+      "id": "q033",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_partial#5",
+        "postgres_indexes_multicolumn#1",
+        "postgres_indexes_multicolumn#2",
+        "postgres_indexes_unique#0",
+        "postgres_indexes_partial#4"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_multicolumn#0",
+        "postgres_indexes_partial#7"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q034",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_transaction_iso#7",
+        "postgres_transaction_iso#9",
+        "postgres_explicit_locking#7",
+        "postgres_transaction_iso#8",
+        "postgres_transaction_iso#11"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_explicit_locking#8",
+        "postgres_transaction_iso#17"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q035",
+      "type": "multi_hop",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_uuid#0",
+        "postgres_transaction_iso#11",
+        "postgres_datatype_numeric#6",
+        "postgres_transaction_iso#9",
+        "postgres_ddl_partitioning#14"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_datatype_uuid#0",
+        "postgres_ddl_default#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 0.6131471927654584
+    },
+    {
+      "id": "q036",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#2",
+        "postgres_runtime_config_connection#10",
+        "postgres_runtime_config_connection#13",
+        "postgres_runtime_config_connection#14",
+        "postgres_explicit_locking#9"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q037",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#9",
+        "postgres_runtime_config_connection#8",
+        "postgres_client_authentication#0",
+        "postgres_runtime_config_connection#13",
+        "postgres_runtime_config_connection#11"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q038",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_schemas#7",
+        "postgres_role_attributes#1",
+        "postgres_ddl_partitioning#18",
+        "postgres_role_attributes#2",
+        "postgres_tutorial_createdb#1"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q039",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_datatype_numeric#1",
+        "postgres_explicit_locking#0",
+        "postgres_ddl_inherit#6",
+        "postgres_explicit_locking#8",
+        "postgres_datatype_numeric#0"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q040",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_backup_dump#4",
+        "postgres_backup_dump#1",
+        "postgres_tutorial_accessdb#1",
+        "postgres_mvcc_intro#0",
+        "postgres_queries_with#10"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q041",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_tutorial_arch#0",
+        "postgres_tutorial_accessdb#1",
+        "postgres_backup_dump#1",
+        "postgres_tutorial_accessdb#0",
+        "postgres_functions_json#62"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q042",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#6",
+        "postgres_transaction_iso#10",
+        "postgres_runtime_config_connection#7",
+        "postgres_high_availability#2",
+        "postgres_transaction_iso#4"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q043",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_backup_dump#3",
+        "postgres_backup_file#2",
+        "postgres_tutorial_accessdb#1",
+        "postgres_explicit_locking#5",
+        "postgres_backup_dump#4"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q044",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_runtime_config_connection#2",
+        "postgres_runtime_config_connection#10",
+        "postgres_runtime_config_connection#14",
+        "postgres_datatype_datetime#6",
+        "postgres_backup_dump#1"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q045",
+      "type": "unanswerable",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_schemas#7",
+        "postgres_role_attributes#2",
+        "postgres_explicit_locking#8",
+        "postgres_ddl_constraints#7",
+        "postgres_tutorial_table#0"
+      ],
+      "supporting_chunk_ids": [],
+      "recall_at_5": null,
+      "mrr": null,
+      "ndcg_at_10": null
+    },
+    {
+      "id": "q046",
+      "type": "false_premise",
+      "retrieved_chunk_ids": [
+        "postgres_mvcc_intro#0",
+        "postgres_explicit_locking#0",
+        "postgres_mvcc_caveats#0",
+        "postgres_transaction_iso#9",
+        "postgres_transaction_iso#0"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_mvcc_intro#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q047",
+      "type": "false_premise",
+      "retrieved_chunk_ids": [
+        "postgres_dml_delete#0",
+        "postgres_queries_table_expressions#14",
+        "postgres_ddl_constraints#8",
+        "postgres_queries_with#9",
+        "postgres_datatype_enum#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_dml_delete#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    },
+    {
+      "id": "q048",
+      "type": "false_premise",
+      "retrieved_chunk_ids": [
+        "postgres_role_attributes#1",
+        "postgres_role_attributes#3",
+        "postgres_role_attributes#2",
+        "postgres_role_attributes#0",
+        "postgres_role_membership#1"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_role_attributes#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 0.25,
+      "ndcg_at_10": 0.43067655807339306
+    },
+    {
+      "id": "q049",
+      "type": "false_premise",
+      "retrieved_chunk_ids": [
+        "postgres_ddl_basics#0",
+        "postgres_ddl_alter#0",
+        "postgres_ddl_system_columns#2",
+        "postgres_ddl_partitioning#0",
+        "postgres_indexes_partial#3"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_ddl_basics#3",
+        "postgres_indexes_multicolumn#0"
+      ],
+      "recall_at_5": 0.0,
+      "mrr": 0.0,
+      "ndcg_at_10": 0.0
+    },
+    {
+      "id": "q050",
+      "type": "false_premise",
+      "retrieved_chunk_ids": [
+        "postgres_indexes_types#0",
+        "postgres_indexes_types#1",
+        "postgres_indexes_multicolumn#1",
+        "postgres_indexes_partial#3",
+        "postgres_indexes_multicolumn#2"
+      ],
+      "supporting_chunk_ids": [
+        "postgres_indexes_types#1",
+        "postgres_indexes_types#0"
+      ],
+      "recall_at_5": 1.0,
+      "mrr": 1.0,
+      "ndcg_at_10": 1.0
+    }
+  ]
+}

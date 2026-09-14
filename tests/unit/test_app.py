@@ -8,11 +8,20 @@ an LLM provider.
 
 from __future__ import annotations
 
-from fastapi.testclient import TestClient
+from collections.abc import Iterator
 
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.db.models import Base
+from app.db.session import get_db
 from app.dependencies import get_pipeline
 from app.main import app
 from rag.generator import GenerationError
+from rag.metrics import metrics_recorder
 from rag.models import PipelineResult, RetrievedChunk, TokenUsage
 from rag.stores.qdrant import VectorStoreError
 
@@ -157,3 +166,122 @@ def test_query_endpoint_maps_unexpected_error_to_500() -> None:
     finally:
         app.dependency_overrides.clear()
     assert response.status_code == 500
+
+
+def test_query_endpoint_includes_citation_validation_fields() -> None:
+    fake = FakePipeline(
+        result=make_result(citation_validation_passed=False, invalid_citations=["ops-guide#99"])
+    )
+    app.dependency_overrides[get_pipeline] = lambda: fake
+    try:
+        with TestClient(app) as client:
+            response = client.post("/query", json={"question": "q"})
+    finally:
+        app.dependency_overrides.clear()
+
+    body = response.json()
+    assert body["citation_validation_passed"] is False
+    assert body["invalid_citations"] == ["ops-guide#99"]
+
+
+def test_query_endpoint_defaults_citation_validation_to_passed() -> None:
+    fake = FakePipeline(result=make_result())
+    app.dependency_overrides[get_pipeline] = lambda: fake
+    try:
+        with TestClient(app) as client:
+            response = client.post("/query", json={"question": "q"})
+    finally:
+        app.dependency_overrides.clear()
+
+    body = response.json()
+    assert body["citation_validation_passed"] is True
+    assert body["invalid_citations"] == []
+
+
+# --- Phase 5: /feedback -----------------------------------------------------
+
+
+@pytest.fixture
+def sqlite_db_override() -> Iterator[None]:
+    """Overrides get_db with an in-memory SQLite session, so /feedback tests
+    never touch a real Postgres - same convention as FakePipeline overriding
+    get_pipeline above."""
+    # StaticPool: TestClient serves requests on a different thread than this
+    # fixture, and a plain sqlite:///:memory: connection is per-thread (so the
+    # request thread would see an empty, table-less database without this).
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+
+    def _get_db() -> Iterator[Session]:
+        db = factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _get_db
+    try:
+        yield
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+
+
+def test_feedback_endpoint_persists_and_returns_success(sqlite_db_override: None) -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/feedback",
+            json={"trace_id": "trace-123", "rating": 1, "comment": "helpful"},
+        )
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+
+
+def test_feedback_endpoint_accepts_missing_comment(sqlite_db_override: None) -> None:
+    with TestClient(app) as client:
+        response = client.post("/feedback", json={"trace_id": "trace-123", "rating": -1})
+    assert response.status_code == 200
+    assert response.json() == {"success": True}
+
+
+def test_feedback_endpoint_rejects_out_of_range_rating(sqlite_db_override: None) -> None:
+    with TestClient(app) as client:
+        response = client.post("/feedback", json={"trace_id": "trace-123", "rating": 5})
+    assert response.status_code == 422
+
+
+def test_feedback_endpoint_rejects_missing_trace_id(sqlite_db_override: None) -> None:
+    with TestClient(app) as client:
+        response = client.post("/feedback", json={"rating": 1})
+    assert response.status_code == 422
+
+
+# --- Phase 5: /metrics -------------------------------------------------------
+
+
+def test_metrics_endpoint_reports_empty_window_with_no_recorded_requests() -> None:
+    metrics_recorder._costs.clear()  # type: ignore[attr-defined]
+    metrics_recorder._latencies.clear()  # type: ignore[attr-defined]
+    with TestClient(app) as client:
+        response = client.get("/metrics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 0
+    assert body["mean_cost_usd"] is None
+    assert body["p95_latency_ms"] is None
+
+
+def test_metrics_endpoint_reports_recorded_requests() -> None:
+    metrics_recorder._costs.clear()  # type: ignore[attr-defined]
+    metrics_recorder._latencies.clear()  # type: ignore[attr-defined]
+    metrics_recorder.record(cost_usd=0.001, latency_ms=100.0)
+    metrics_recorder.record(cost_usd=0.003, latency_ms=200.0)
+    with TestClient(app) as client:
+        response = client.get("/metrics")
+    body = response.json()
+    assert body["count"] == 2
+    assert body["mean_cost_usd"] == pytest.approx(0.002)
