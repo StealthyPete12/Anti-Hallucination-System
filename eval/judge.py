@@ -17,7 +17,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from string import Template
 from typing import Any
@@ -45,7 +45,7 @@ class PromptTemplate:
     sha256: str
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_prompt(name: str) -> PromptTemplate:
     """Load and hash a versioned prompt template from ``eval/prompts/<name>.txt``.
 

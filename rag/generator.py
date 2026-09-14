@@ -78,10 +78,11 @@ class LiteLLMGenerator:
 
         answer = response.choices[0].message.content or ""
         usage = _extract_usage(response)
+        cost_usd = _extract_cost(response, self.model)
         citations = _extract_valid_citations(answer, retrieved_ids)
 
         logger.info("Generated answer with %d valid citation(s)", len(citations))
-        return GenerationResult(answer=answer, citations=citations, usage=usage)
+        return GenerationResult(answer=answer, citations=citations, usage=usage, cost_usd=cost_usd)
 
 
 def _build_user_prompt(query: str, chunks: list[RetrievedChunk]) -> str:
@@ -117,3 +118,11 @@ def _extract_usage(response: object) -> TokenUsage:
         completion_tokens=getattr(usage, "completion_tokens", 0) or 0,
         total_tokens=getattr(usage, "total_tokens", 0) or 0,
     )
+
+
+def _extract_cost(response: object, model: str) -> float:
+    try:
+        return float(litellm.completion_cost(completion_response=response, model=model))
+    except Exception as exc:  # noqa: BLE001 - cost lookup can fail for unpriced/unknown models
+        logger.debug("Could not compute cost for model=%s: %s", model, exc)
+        return 0.0

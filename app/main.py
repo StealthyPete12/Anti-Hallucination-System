@@ -68,5 +68,6 @@ def query(
         ],
         latency_ms=result.latency_ms,
         usage=result.usage,
+        cost_usd=result.cost_usd,
         trace_id=result.trace_id,
     )

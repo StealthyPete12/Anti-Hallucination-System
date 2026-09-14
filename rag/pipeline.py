@@ -119,5 +119,6 @@ class RagPipeline:
             retrieved_chunks=retrieved,
             latency_ms=latency_ms,
             usage=result.usage,
+            cost_usd=result.cost_usd,
             trace_id=trace_id,
         )

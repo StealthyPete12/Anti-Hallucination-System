@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     llm_max_tokens: int = 1024
     llm_timeout_seconds: float = 60.0
 
+    # --- Evaluation judge (LiteLLM, Phase 2) ---------------------------------
+    judge_model: str = "gpt-4o-mini"
+    judge_timeout_seconds: float = 60.0
+    judge_max_retries: int = 3
+
     # --- API ------------------------------------------------------------------
     api_host: str = "0.0.0.0"
     api_port: int = 8000

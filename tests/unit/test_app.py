@@ -57,6 +57,7 @@ def make_result(**overrides: object) -> PipelineResult:
         "retrieved_chunks": [make_retrieved_chunk(cid) for cid in retrieved_chunk_ids],  # type: ignore[union-attr]
         "latency_ms": {"embed": 38.7, "retrieve": 12.1, "generate": 621.3, "total": 672.1},
         "usage": TokenUsage(prompt_tokens=100, completion_tokens=20, total_tokens=120),
+        "cost_usd": 0.00042,
         "trace_id": "00000000-0000-0000-0000-000000000000",
     }
     defaults.update(overrides)
@@ -97,6 +98,7 @@ def test_query_endpoint_returns_full_contract() -> None:
         "total": 672.1,
     }
     assert body["usage"] == {"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120}
+    assert body["cost_usd"] == 0.00042
     assert "trace_id" in body
     assert fake.received_question == "What is the retention period?"
 

@@ -74,7 +74,7 @@ markers = [
 # newer PEP 695 syntax appearing in third-party stub files (e.g. numpy); our
 # own code still targets 3.11 and uses no newer syntax.
 python_version = "3.12"
-files = ["rag", "app", "config.py", "scripts"]
+files = ["rag", "app", "config.py", "scripts", "eval"]
 ignore_missing_imports = true
 disallow_untyped_defs = true
 warn_unused_ignores = true

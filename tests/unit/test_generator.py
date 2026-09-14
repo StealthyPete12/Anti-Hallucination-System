@@ -110,6 +110,35 @@ def test_usage_is_extracted_from_response(monkeypatch: pytest.MonkeyPatch) -> No
     assert result.usage.total_tokens == 60
 
 
+def test_cost_is_extracted_from_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_completion(**kwargs: Any) -> ModelResponse:
+        return fake_response("answer [a#0]")
+
+    monkeypatch.setattr("rag.generator.litellm.completion", fake_completion)
+    monkeypatch.setattr("rag.generator.litellm.completion_cost", lambda **kwargs: 0.00123)
+
+    generator = LiteLLMGenerator(model="fake-model")
+    result = generator.generate("q", [make_chunk("a#0")])
+
+    assert result.cost_usd == pytest.approx(0.00123)
+
+
+def test_cost_defaults_to_zero_when_lookup_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_completion(**kwargs: Any) -> ModelResponse:
+        return fake_response("answer [a#0]")
+
+    def failing_cost(**kwargs: Any) -> float:
+        raise ValueError("unpriced model")
+
+    monkeypatch.setattr("rag.generator.litellm.completion", fake_completion)
+    monkeypatch.setattr("rag.generator.litellm.completion_cost", failing_cost)
+
+    generator = LiteLLMGenerator(model="fake-model")
+    result = generator.generate("q", [make_chunk("a#0")])
+
+    assert result.cost_usd == 0.0
+
+
 def test_llm_call_failure_raises_generation_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def failing_completion(**kwargs: Any) -> ModelResponse:
         raise RuntimeError("provider unreachable")

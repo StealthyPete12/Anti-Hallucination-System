@@ -31,6 +31,7 @@ class QueryResponse(BaseModel):
     retrieved_chunks: list[RetrievedChunkOut]
     latency_ms: dict[str, float]
     usage: TokenUsage
+    cost_usd: float
     trace_id: str
 
 

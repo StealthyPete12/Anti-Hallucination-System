@@ -19,7 +19,9 @@ from __future__ import annotations
 import math
 
 
-def recall_at_k(retrieved_chunk_ids: list[str], relevant_chunk_ids: list[str], k: int) -> float | None:
+def recall_at_k(
+    retrieved_chunk_ids: list[str], relevant_chunk_ids: list[str], k: int
+) -> float | None:
     """1.0 if at least one relevant chunk appears in the top ``k`` retrieved results, else 0.0.
 
     This is "hit rate@k" (binary), not the fraction of relevant chunks
@@ -56,7 +58,9 @@ def _dcg(relevances: list[float]) -> float:
     return sum(rel / math.log2(i + 2) for i, rel in enumerate(relevances))
 
 
-def ndcg_at_k(retrieved_chunk_ids: list[str], relevant_chunk_ids: list[str], k: int = 10) -> float | None:
+def ndcg_at_k(
+    retrieved_chunk_ids: list[str], relevant_chunk_ids: list[str], k: int = 10
+) -> float | None:
     """Normalized Discounted Cumulative Gain at rank ``k``, with binary relevance.
 
     DCG@k = sum_{i=1}^{k} rel_i / log2(i + 1)

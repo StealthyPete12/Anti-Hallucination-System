@@ -62,6 +62,7 @@ class GenerationResult:
     answer: str
     citations: list[str]
     usage: TokenUsage
+    cost_usd: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -74,4 +75,5 @@ class PipelineResult:
     retrieved_chunks: list[RetrievedChunk]
     latency_ms: dict[str, float]
     usage: TokenUsage
+    cost_usd: float
     trace_id: str

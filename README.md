@@ -6,13 +6,20 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
   deterministic ingestion/chunking pipeline, and a manually verified
   50-question golden benchmark set, with automated tests that prevent the
   benchmark from drifting or silently breaking.
-- **Phase 1** (this phase) builds the simplest possible production-quality
-  baseline RAG system on top of that foundation — chunking, embedding,
-  vector storage, retrieval, and LLM generation, served through a FastAPI
-  `/query` endpoint and runnable end to end with `docker compose up`. No
-  hybrid retrieval, rerankers, query rewriting, or agents yet — this phase
-  exists to establish a measurable baseline that later phases are compared
-  against.
+- **Phase 1** builds the simplest possible production-quality baseline RAG
+  system on top of that foundation — chunking, embedding, vector storage,
+  retrieval, and LLM generation, served through a FastAPI `/query` endpoint
+  and runnable end to end with `docker compose up`. No hybrid retrieval,
+  rerankers, query rewriting, or agents yet — this phase exists to
+  establish a measurable baseline that later phases are compared against.
+- **Phase 2** (this phase) builds the evaluation harness that turns "it
+  seems to work" into numbers: deterministic retrieval metrics
+  (Recall@5/MRR/nDCG@10), LLM-judged faithfulness (per-claim hallucination
+  detection) and correctness, and refusal-behavior scoring on the
+  `unanswerable`/`false_premise` golden-set subsets — plus cost, latency,
+  and a measured run-to-run noise floor, so future retrieval/generation
+  changes can be judged against real variance instead of guesswork. See
+  [Phase 2: Evaluation harness](#phase-2-evaluation-harness) below.
 
 ## Project overview
 
@@ -29,6 +36,23 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
 │   │   └── local.py             # BAAI/bge-small-en-v1.5 via sentence-transformers
 │   └── stores/
 │       └── qdrant.py            # Qdrant-backed dense vector store
+│
+├── eval/                        # Phase 2: evaluation harness
+│   ├── dataset.py                # typed golden-set loader
+│   ├── judge.py                  # LiteLLM judge client: temp=0, JSON, retries, cost, prompt hashing
+│   ├── metrics/
+│   │   ├── retrieval.py           # Recall@K, MRR, nDCG@K (pure Python, no LLM)
+│   │   ├── faithfulness.py        # per-claim hallucination detection
+│   │   ├── correctness.py         # correct/partial/incorrect verdict scoring
+│   │   └── refusal.py             # unanswerable/false_premise refusal scoring
+│   ├── prompts/                  # versioned judge prompts (never hardcoded in Python)
+│   │   ├── faithfulness_v1.txt
+│   │   ├── correctness_v1.txt
+│   │   └── refusal_v1.txt
+│   ├── results.py                # QuestionResult: one question's full evaluation record
+│   ├── scorecard.py               # aggregation + noise-floor (mean/stdev across --repeats)
+│   ├── summary.py                 # human-readable stdout summary table
+│   └── run.py                     # CLI: `python -m eval.run`
 │
 ├── app/
 │   ├── main.py                  # FastAPI app: GET /health, POST /query
@@ -53,7 +77,9 @@ A RAG (Retrieval-Augmented Generation) evaluation project.
 ├── tests/
 │   ├── test_golden_set.py       # Phase 0: golden-set schema/integrity tests
 │   ├── unit/                    # fast, no real model/Qdrant/LLM calls
-│   └── integration/             # real qdrant-client engine and/or real model weights
+│   └── integration/             # real qdrant-client engine / real model weights /
+│                                 # eval.run's async orchestration (fakes throughout,
+│                                 # but exercises every module wired together)
 │
 ├── config.py                    # centralized, env-driven settings (pydantic-settings)
 ├── Dockerfile
@@ -202,6 +228,7 @@ curl -X POST http://localhost:8000/query \
   "retrieved_chunk_ids": ["postgres_transaction_iso#2", "postgres_transaction_iso#1", "postgres_transaction_iso#3"],
   "latency_ms": {"embed": 12.4, "retrieve": 8.1, "generate": 640.2, "total": 660.7},
   "usage": {"prompt_tokens": 812, "completion_tokens": 24, "total_tokens": 836},
+  "cost_usd": 0.00051,
   "trace_id": "b6b6e9b0-6f2f-4c1a-9e2a-6a7a6b1a2c3d"
 }
 ```
@@ -275,14 +302,21 @@ uv run pytest -m "not integration" -v  # everything except integration tests
 ```
 
 - `tests/unit/` — chunking, embedding-prefix logic, generator citation
-  contract, pipeline orchestration, and the FastAPI endpoints, each tested
-  against small fakes satisfying the Protocols in `rag/protocols.py`. No
-  network access, model download, or running Qdrant/LLM required.
+  contract, pipeline orchestration, the FastAPI endpoints, and (Phase 2)
+  the golden-set loader, every metric module (`retrieval`, `faithfulness`,
+  `correctness`, `refusal`), the judge client, scorecard aggregation, and
+  summary rendering — each tested against small fakes satisfying the
+  Protocols in `rag/protocols.py` or a fake judge. No network access, model
+  download, or running Qdrant/LLM required.
 - `tests/integration/` — `test_qdrant_store.py` runs the real
   `qdrant-client` engine in `:memory:` mode (no server needed);
   `test_pipeline_e2e.py` additionally downloads the real embedding model
   and asserts retrieval actually surfaces the right chunk for a real
-  question (skipped automatically if offline).
+  question (skipped automatically if offline); `test_eval_run.py` runs
+  `eval.run`'s full async orchestration (dataset load → concurrent
+  pipeline+judge fan-out → scorecard → noise floor → file write → CLI
+  `main()`) against a fake pipeline and fake judge, proving every Phase 2
+  module works together correctly as a whole.
 - `tests/test_golden_set.py` — Phase 0's golden-set schema/integrity
   guardrail; unaffected by anything in this phase.
 
@@ -305,6 +339,9 @@ overridable with an `RAG_`-prefixed environment variable or `.env` file:
 | `RAG_LLM_MODEL` | `gpt-4o-mini` | Any [LiteLLM](https://docs.litellm.ai/docs/providers)-supported model string |
 | `RAG_LLM_TEMPERATURE` | `0.0` | Generation temperature |
 | `RAG_LLM_MAX_TOKENS` | `1024` | Max generation tokens |
+| `RAG_JUDGE_MODEL` | `gpt-4o-mini` | LiteLLM model string used by the Phase 2 evaluation judge |
+| `RAG_JUDGE_TIMEOUT_SECONDS` | `60.0` | Per-call judge timeout |
+| `RAG_JUDGE_MAX_RETRIES` | `3` | Judge call retries (exponential backoff) before failing the question |
 | `RAG_LOG_LEVEL` | `INFO` | Logging verbosity |
 
 Provider API keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, ...) are read
@@ -335,12 +372,14 @@ class QueryResponse(BaseModel):
     retrieved_chunk_ids: list[str]  # every chunk retrieval returned, rank-ordered
     latency_ms: dict[str, float]  # {"embed", "retrieve", "generate", "total"}
     usage: TokenUsage  # prompt_tokens, completion_tokens, total_tokens
+    cost_usd: float  # dollar cost of the generation call (litellm.completion_cost)
     trace_id: str  # UUID, also present in the structured logs for this request
 ```
 
-`retrieved_chunk_ids` and `latency_ms` are returned from this same
-production endpoint from day one — there is no separate evaluation code
-path. A future evaluation harness (Phase 4) consumes exactly this response.
+`retrieved_chunk_ids`, `latency_ms`, and `cost_usd` are returned from this
+same production endpoint from day one — there is no separate evaluation
+code path. The Phase 2 evaluation harness (`eval/run.py`) consumes exactly
+this response via `pipeline.query()`.
 
 ### Grounding and citation rules
 
@@ -395,29 +434,231 @@ merge-conflict guards), and the full pytest suite before every commit.
    updated corpus.
 6. Run `uv run pytest` and fix anything it flags before committing.
 
+## Phase 2: Evaluation harness
+
+Phase 2 turns the Phase 1 baseline into a set of numbers: it runs the real
+production pipeline (the exact same `pipeline.query()` the FastAPI endpoint
+calls — no separate "evaluation" code path) against every question in
+`data/golden_set.jsonl`, scores retrieval quality deterministically, scores
+generation quality and safety with an LLM judge, and aggregates everything
+into a scorecard. It intentionally makes **no** retrieval or generation
+improvements — no rerankers, no hybrid search, no query rewriting, no
+agents — its only job is to measure the baseline precisely enough that
+later improvements can be judged against real evidence instead of vibes.
+
+### Architecture
+
+```
+data/golden_set.jsonl (50 questions)
+      |
+      v
+eval.dataset.load_golden_set()  ->  list[GoldenQuestion]
+      |
+      v  (asyncio.Semaphore-bounded concurrency, 8-12 in flight)
+pipeline.query(question)  ->  answer, retrieved_chunk_ids, retrieved_chunks,
+      |                       latency_ms, cost_usd, trace_id
+      |
+      +--> eval.metrics.retrieval  (pure Python: Recall@5, MRR, nDCG@10)
+      |
+      +--> eval.judge.LLMJudge  (LiteLLM, temp=0, JSON, retries, cost, prompt hash)
+              |
+              +--> eval.metrics.faithfulness  (always)
+              +--> eval.metrics.correctness   (always)
+              +--> eval.metrics.refusal       (only unanswerable / false_premise)
+      |
+      v
+eval.results.QuestionResult (one per question)
+      |
+      v
+eval.scorecard.build_scorecard()  ->  retrieval / generation / safety / ops + per_question
+      |
+      v (if --repeats > 1)
+eval.scorecard.compute_noise_floor()  ->  mean/stdev per metric across repeats
+      |
+      v
+evals/results.json  +  eval.summary.render_summary() printed to stdout
+```
+
+Each question's pipeline call is synchronous (real network/model calls), so
+it runs in a worker thread via `asyncio.to_thread` behind a semaphore; the
+faithfulness/correctness/refusal judge calls for a question are natively
+async and run concurrently with each other. This is what lets a 50-question
+run with 8-12 concurrent in-flight questions complete in roughly a minute
+instead of running every question strictly one at a time.
+
+### Metric definitions
+
+**Retrieval** (`eval/metrics/retrieval.py`) — pure Python, deterministic, no
+LLM calls, computed against `supporting_chunk_ids`:
+
+- **Recall@5** — 1.0 if *any* supporting chunk appears in the top 5
+  retrieved chunks, else 0.0 (hit-rate@k, not fraction-of-relevant-chunks).
+- **MRR** — `1 / rank` of the first supporting chunk found (1-indexed);
+  `0.0` if none is found anywhere in the retrieved list.
+- **nDCG@10** — `DCG@10 / IDCG@10` with binary relevance, where
+  `DCG@k = Σ rel_i / log2(i + 1)` for ranks `i = 1..k`.
+
+A question with no `supporting_chunk_ids` (every `unanswerable` question) is
+excluded from these three metrics' averages entirely (`None`, not `0.0`) —
+there is nothing to recall, so scoring it as a retrieval failure would
+misrepresent retrieval quality.
+
+**Faithfulness** (`eval/metrics/faithfulness.py`) — deliberately *not* a
+vague 1-5 LLM score. The judge breaks the generated answer into atomic
+factual claims and verdicts each one independently against the retrieved
+context (never outside knowledge). Score = `supported_claims / total_claims`.
+An answer with zero claims (a pure refusal) is vacuously faithful (`1.0`) —
+it made no assertions, so it cannot have hallucinated.
+
+**Correctness** (`eval/metrics/correctness.py`) — the judge compares
+question, `reference_answer`, and generated answer, returning exactly one
+verdict: `correct` (1.0), `partial` (0.5), or `incorrect` (0.0). The overall
+score is the mean across all evaluated questions, including the
+`unanswerable`/`false_premise` subset — for those, the reference answer
+*is* the correct refusal, so a system that correctly declines also scores
+`correct` here.
+
+**Refusal** (`eval/metrics/refusal.py`) — applies only to the
+`unanswerable` and `false_premise` golden-set subsets, where declining (or
+challenging a false premise) is the *correct* behavior. `refusal_rate =
+correct_refusals / required_refusals`; `fabrications` counts how many of
+those questions the system answered instead of refusing — each one is a
+hallucination-adjacent safety incident, not just a missed point.
+
+### Prompt versioning and hashing
+
+Every judge prompt lives as a plain-text file in `eval/prompts/`
+(`faithfulness_v1.txt`, `correctness_v1.txt`, `refusal_v1.txt`) — never
+hardcoded in Python. `eval/judge.py` loads each file once per process,
+computes its SHA256, and stamps that hash (plus the version parsed from the
+filename, e.g. `v1`) onto every `JudgeResponse`. `eval.run.build_config()`
+records all three hashes under `config.judge_prompt_hash` in every
+scorecard, so editing a prompt is immediately visible as a hash change in
+the output — "faithfulness" and "correctness" can never silently mean
+something different between two runs without it showing up in the diff.
+
+### Running the evaluation harness
+
+Requires the same running Qdrant + indexed corpus + LLM provider key as
+Phase 1 (see "Running locally without Docker" above), since it exercises
+the real production pipeline:
+
+```bash
+uv run python -m eval.run \
+  --dataset data/golden_set.jsonl \
+  --out evals/results.json \
+  --repeats 1
+```
+
+| Flag | Default | Purpose |
+|---|---|---|
+| `--dataset` | `data/golden_set.jsonl` | Golden-set JSONL file to evaluate |
+| `--out` | `evals/results.json` | Where to write the scorecard JSON |
+| `--repeats` | `1` | Full evaluation passes; `>1` also computes a noise floor |
+| `--concurrency` | `10` | Max in-flight questions (pipeline + judge combined) |
+| `--judge-model` | `settings.judge_model` (`RAG_JUDGE_MODEL`) | LiteLLM model string for the judge |
+| `--log-level` | `settings.log_level` | Overrides `RAG_LOG_LEVEL` for this run |
+
+A human-readable summary (Retrieval / Generation / Safety / Ops) prints to
+stdout automatically at the end of every run, in addition to the full JSON
+scorecard written to `--out`.
+
+### Scorecard structure
+
+```json
+{
+  "git_sha": "a1b2c3d",
+  "timestamp": "2026-09-14T10:00:00Z",
+  "config": {
+    "embedder": "BAAI/bge-small-en-v1.5",
+    "generator": "gpt-4o-mini",
+    "judge": "gpt-4o-mini",
+    "judge_prompt_hash": {
+      "faithfulness_v1": "…", "correctness_v1": "…", "refusal_v1": "…"
+    },
+    "top_k": 5,
+    "rerank": false
+  },
+  "retrieval": {"recall_at_5": 0.82, "mrr": 0.68, "ndcg_at_10": 0.74},
+  "generation": {"faithfulness": 0.89, "correctness": 0.79},
+  "safety": {"refusal_rate": 0.93, "fabrications": 1},
+  "ops": {"mean_cost_usd": 0.0019, "p95_latency_ms": 1740.0},
+  "num_questions": 50,
+  "num_errors": 0,
+  "per_question": [
+    {
+      "id": "q001", "type": "single_hop", "question": "…",
+      "generated_answer": "…", "reference_answer": "…",
+      "retrieved_chunk_ids": ["…"],
+      "retrieval_metrics": {"recall_at_5": 1.0, "mrr": 1.0, "ndcg_at_10": 1.0},
+      "faithfulness": {"score": 1.0, "unsupported_count": 0, "claims": [...], "prompt_hash": "…"},
+      "correctness": {"verdict": "correct", "reason": "…", "score": 1.0, "prompt_hash": "…"},
+      "refusal": null,
+      "latency_ms": {"embed": 12.4, "retrieve": 8.1, "generate": 640.2, "total": 660.7},
+      "cost_usd": 0.0007,
+      "trace_id": "…",
+      "error": null
+    }
+  ]
+}
+```
+
+With `--repeats > 1`, three additional top-level keys appear: `repeats`
+(the count), `runs` (each pass's `retrieval`/`generation`/`safety`/`ops`
+section, for eyeballing pass-to-pass drift), and `noise_floor` (see below).
+A question whose pipeline call or judge call raises is never allowed to
+crash the run: its `error` field is set, it's excluded from every
+aggregate, and `num_errors` reports the count — silently dropping a failed
+question from a metric's denominator would inflate that metric.
+
+### Noise floor methodology
+
+LLM judges and generators are not perfectly deterministic even at
+`temperature=0` (provider-side batching, minor numeric drift, sporadic
+retries after a malformed-JSON response). `--repeats 5` runs the entire
+50-question evaluation five times with **zero code changes** and computes
+the mean and standard deviation of every headline metric
+(`recall_at_5`, `mrr`, `ndcg_at_10`, `faithfulness`, `correctness`,
+`refusal_rate`, `mean_cost_usd`, `p95_latency_ms`) across the five runs via
+`eval.scorecard.compute_noise_floor()`.
+
+```bash
+uv run python -m eval.run --repeats 5 --out evals/noise_floor.json
+```
+
+**Interpretation:** this standard deviation *is* the project's noise floor.
+A future change (a reranker, a different chunk size, a new prompt) that
+moves a metric by less than roughly one noise-floor standard deviation
+cannot be distinguished from run-to-run evaluation noise and should not be
+reported as an improvement; a change has to clear that bar before it's
+trusted as real. Because this repository's evaluation environment has no
+Qdrant instance or LLM provider credentials configured, an actual 5-repeat
+noise-floor measurement (with real numbers) has not been run here — do that
+once against a live deployment and record the resulting `evals/noise_floor.json`
+alongside this section for future reference before comparing any
+retrieval/generation change against it.
+
 ## Future phases roadmap
 
-Phase 1 (this phase) is intentionally the simplest possible
-production-quality baseline: single-stage dense retrieval, no reranking,
-no query rewriting, no agents. Future phases build on top of it:
+Phase 1 was intentionally the simplest possible production-quality
+baseline: single-stage dense retrieval, no reranking, no query rewriting,
+no agents. Phase 2 (this phase) built the evaluation harness that measures
+it. Future phases build on both:
 
-- **Phase 2 — Retrieval evaluation**: score this baseline's retrieval
-  (top-k recall/precision) against the golden set's `supporting_chunk_ids`,
-  establishing the numeric baseline everything else is compared against.
-- **Phase 3 — Generation & grounding evaluation**: score answer
-  correctness against `reference_answer`, and citation/attribution
-  accuracy against `supporting_chunk_ids` and `retrieved_chunk_ids`.
-- **Phase 4 — Hallucination & refusal evaluation**: use the
-  `unanswerable` and `false_premise` subsets specifically to score refusal
-  behavior and premise-correction behavior, not just factual recall.
-- **Phase 5 — Regression harness / CI**: run the full golden set against
-  the live `/query` endpoint automatically on every change, tracking score
-  deltas over time so regressions in retrieval or grounding are caught
-  before merge.
-- **Beyond that**: hybrid retrieval, rerankers, query rewriting, and other
-  techniques explicitly excluded from this baseline - each one measured
-  against the Phase 1 baseline it improves on.
+- **Phase 3 — Retrieval/generation improvements**: hybrid retrieval,
+  rerankers, query rewriting, and other techniques explicitly excluded from
+  the Phase 1 baseline — each one measured with the Phase 2 harness against
+  the Phase 1 baseline it's meant to improve on, and required to clear the
+  measured noise floor before being called an improvement.
+- **Phase 4 — Regression harness / CI**: run `eval.run` against the live
+  `/query` endpoint automatically on every change, tracking scorecards over
+  time so regressions in retrieval, faithfulness, correctness, or refusal
+  behavior are caught before merge rather than discovered in production.
+- **Beyond that**: graph RAG, agentic retrieval, and other techniques not
+  yet in scope — each still measured the same way, against the same
+  golden set, through the same harness.
 
-Each future phase should keep `tests/test_golden_set.py` and this phase's
-test suite green — they are the guardrails that keep both the benchmark
-and the baseline trustworthy as the system grows.
+Each future phase should keep `tests/test_golden_set.py` and every prior
+phase's test suite green — they are the guardrails that keep the benchmark,
+the baseline, and the evaluation harness itself trustworthy as the system
+grows.

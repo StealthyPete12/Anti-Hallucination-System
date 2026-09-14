@@ -72,14 +72,20 @@ def test_parse_claims_happy_path() -> None:
     claims, unsupported = parse_claims(
         {
             "claims": [
-                {"text": "MVCC stands for Multiversion Concurrency Control.", "supported": True, "chunk_id": "a#0"},
+                {
+                    "text": "MVCC stands for Multiversion Concurrency Control.",
+                    "supported": True,
+                    "chunk_id": "a#0",
+                },
                 {"text": "It was invented in 2020.", "supported": False, "chunk_id": None},
             ],
             "unsupported_count": 1,
         }
     )
     assert claims == [
-        Claim(text="MVCC stands for Multiversion Concurrency Control.", supported=True, chunk_id="a#0"),
+        Claim(
+            text="MVCC stands for Multiversion Concurrency Control.", supported=True, chunk_id="a#0"
+        ),
         Claim(text="It was invented in 2020.", supported=False, chunk_id=None),
     ]
     assert unsupported == 1
@@ -175,8 +181,12 @@ def test_mean_faithfulness_averages_scores() -> None:
     from eval.metrics.faithfulness import FaithfulnessEvaluation
 
     evaluations = [
-        FaithfulnessEvaluation(claims=[], unsupported_count=0, score=1.0, judge_response=make_response({})),
-        FaithfulnessEvaluation(claims=[], unsupported_count=0, score=0.5, judge_response=make_response({})),
+        FaithfulnessEvaluation(
+            claims=[], unsupported_count=0, score=1.0, judge_response=make_response({})
+        ),
+        FaithfulnessEvaluation(
+            claims=[], unsupported_count=0, score=0.5, judge_response=make_response({})
+        ),
     ]
     assert mean_faithfulness(evaluations) == pytest.approx(0.75)
 
@@ -189,7 +199,11 @@ def test_mean_faithfulness_ignores_none_scores() -> None:
     from eval.metrics.faithfulness import FaithfulnessEvaluation
 
     evaluations = [
-        FaithfulnessEvaluation(claims=[], unsupported_count=0, score=None, judge_response=make_response({})),
-        FaithfulnessEvaluation(claims=[], unsupported_count=0, score=0.6, judge_response=make_response({})),
+        FaithfulnessEvaluation(
+            claims=[], unsupported_count=0, score=None, judge_response=make_response({})
+        ),
+        FaithfulnessEvaluation(
+            claims=[], unsupported_count=0, score=0.6, judge_response=make_response({})
+        ),
     ]
     assert mean_faithfulness(evaluations) == pytest.approx(0.6)
