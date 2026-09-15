@@ -1,0 +1,13 @@
+# Phase 5 (stretch): auto-loads grafana/provisioning/dashboards/json/*.json
+# on Grafana startup - no manual "import dashboard" click needed.
+apiVersion: 1
+
+providers:
+  - name: "Phase 5 Observability"
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

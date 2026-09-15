@@ -1,0 +1,25 @@
+# Phase 5 (stretch): auto-provisions Grafana's Postgres data source against
+# the same `postgres` service /feedback and /query already write to - no
+# Prometheus or exporter needed, Grafana queries the tables directly.
+#
+# Values match docker-compose.yml's POSTGRES_USER/PASSWORD/DB defaults. If
+# you override those in .env, update this file (or set the matching
+# GF_DATASOURCES_* env vars) to match - Grafana provisioning files aren't
+# environment-variable-expanded by default.
+apiVersion: 1
+
+datasources:
+  - name: Postgres (rag_observability)
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: rag_observability
+    user: rag
+    isDefault: true
+    editable: true
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    secureJsonData:
+      password: rag

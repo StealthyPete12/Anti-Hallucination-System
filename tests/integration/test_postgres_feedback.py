@@ -20,7 +20,11 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from app.db.models import Base
-from app.db.repository import FeedbackRepository
+from app.db.repository import (
+    FeedbackRepository,
+    RequestMetricRepository,
+    feedback_latency_correlation_query,
+)
 from app.db.session import build_engine
 from config import settings
 
@@ -44,6 +48,7 @@ def session():  # type: ignore[no-untyped-def]
     finally:
         db.rollback()
         db.execute(text("DELETE FROM feedback"))
+        db.execute(text("DELETE FROM request_metrics"))
         db.commit()
         db.close()
 
@@ -66,3 +71,34 @@ def test_list_recent_against_real_postgres(session) -> None:  # type: ignore[no-
 
     recent = repo.list_recent(limit=10)
     assert len(recent) == 2
+
+
+def test_feedback_correlates_with_request_metrics_via_real_postgres(session) -> None:  # type: ignore[no-untyped-def]
+    """Proves the actual analysis question section 6 exists to answer:
+    joining feedback.rating against request_metrics.latency_ms by trace_id."""
+    feedback_repo = FeedbackRepository(session)
+    metric_repo = RequestMetricRepository(session)
+
+    metric_repo.create(
+        trace_id="slow-trace",
+        cost_usd=0.01,
+        latency_ms=5000.0,
+        retrieval_mode="dense",
+        citation_validation_passed=True,
+    )
+    feedback_repo.create(trace_id="slow-trace", rating=-1, comment="too slow")
+
+    metric_repo.create(
+        trace_id="fast-trace",
+        cost_usd=0.001,
+        latency_ms=200.0,
+        retrieval_mode="dense",
+        citation_validation_passed=True,
+    )
+    feedback_repo.create(trace_id="fast-trace", rating=1)
+
+    rows = session.execute(text(feedback_latency_correlation_query())).mappings().all()
+    by_rating = {row["rating"]: row for row in rows}
+
+    assert by_rating[-1]["avg_latency_ms"] == pytest.approx(5000.0)
+    assert by_rating[1]["avg_latency_ms"] == pytest.approx(200.0)

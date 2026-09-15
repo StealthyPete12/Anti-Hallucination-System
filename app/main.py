@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.db.repository import FeedbackRepository
+from app.db.repository import FeedbackRepository, RequestMetricRepository
 from app.db.session import build_engine, get_db, init_db
 from app.dependencies import get_pipeline
 from app.schemas import (
@@ -97,6 +97,7 @@ def feedback(request: FeedbackRequest, db: Session = Depends(get_db)) -> Feedbac
 def query(
     request: QueryRequest,
     pipeline: RagPipeline = Depends(get_pipeline),  # noqa: B008 - standard FastAPI DI pattern
+    db: Session = Depends(get_db),  # noqa: B008
 ) -> QueryResponse:
     trace_id = str(uuid.uuid4())
     logger.info("trace_id=%s Request received: question=%r", trace_id, request.question)
@@ -109,6 +110,20 @@ def query(
     except Exception as exc:  # noqa: BLE001
         logger.exception("trace_id=%s Unexpected failure", trace_id)
         raise HTTPException(status_code=500, detail="Internal error") from exc
+
+    try:
+        RequestMetricRepository(db).create(
+            trace_id=result.trace_id,
+            cost_usd=result.cost_usd,
+            latency_ms=result.latency_ms["total"],
+            retrieval_mode=settings.retrieval_mode,
+            citation_validation_passed=result.citation_validation_passed,
+        )
+    except SQLAlchemyError:
+        # Postgres being down must never fail a query that already succeeded -
+        # Phoenix and rag/metrics.py's in-process window still have this
+        # request's cost/latency even if this row never lands.
+        logger.warning("trace_id=%s Could not persist request metric", trace_id, exc_info=True)
 
     return QueryResponse(
         answer=result.answer,

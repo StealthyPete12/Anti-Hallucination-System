@@ -91,8 +91,28 @@ services:
       phoenix:
         condition: service_healthy
 
+  # Phase 5 (stretch, optional): dashboards over the same `postgres` service -
+  # no Prometheus/exporter needed. Not required for the "docker compose up"
+  # success criteria (api/qdrant/phoenix/postgres only) and never blocks it;
+  # Phoenix remains the primary observability tool. See the README's
+  # "Grafana (optional)" section.
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   qdrant_data:
   model_cache:
   phoenix_data:
   postgres_data:
+  grafana_data:
